@@ -6,19 +6,19 @@ pub struct Request {
     headers: Option<Vec<String>>,
 }
 
-#[derive(PartialEq, Debug)]
-enum Method {
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub enum Method {
     GET,
     POST,
 }
 
-#[derive(PartialEq, Debug)]
-enum Version {
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub enum Version {
     V1_1,
     V2_0,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum Error {
     InvalidString,
     InvalidMethod,
@@ -26,8 +26,29 @@ pub enum Error {
     MissingBlankLine,
 }
 
+impl Version {
+    pub fn ok(&self) -> String {
+        match self {
+            Version::V1_1 => "HTTP/1.1 200 OK\r\n".to_owned(),
+            Version::V2_0 => "HTTP/2 200 OK\r\n".to_owned(), 
+        }
+    }
+}
+
 impl Request {
-    pub fn from_lines(lines: Vec<&str>) -> Result<Request, Error> {
+    pub fn method(&self) -> Method {
+        self.method
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    pub fn version(&self) -> Version {
+        self.version
+    }
+
+    pub fn from_lines(lines: Vec<String>) -> Result<Request, Error> {
         let method;
         let version;
         let path;
@@ -74,7 +95,7 @@ impl Request {
         })      
     }
 
-    pub fn from_string(request_str: &str) -> Result<Request, Error> {
+    pub fn from_string(request_str: String) -> Result<Request, Error> {
         //Make sure its not an empty string and has at least one line
         if request_str.len() == 0 {
             return Err(Error::InvalidString);
@@ -86,7 +107,8 @@ impl Request {
         if blank_line_split.len() == 1 {
             return Err(Error::MissingBlankLine);
         }
-        return Request::from_lines(lines)
+        let lines_string:Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
+        return Request::from_lines(lines_string);
     }
 }
 
@@ -97,14 +119,14 @@ mod tests {
     #[test]
     fn get_wrong_version_new() {
         let expected = Err(Error::InvalidHTTPVersion);
-        let request = Request::from_string("GET / HTTP1.1\r\n\r\n");
+        let request = Request::from_string("GET / HTTP1.1\r\n\r\n".to_owned());
         assert_eq!(expected, request);
     }
     
     #[test]
     fn no_blank_line_new() {
         let expected = Err(Error::MissingBlankLine);
-        let request = Request::from_string("GET / HTTP/1.1");
+        let request = Request::from_string("GET / HTTP/1.1".to_owned());
         assert_eq!(expected, request);
     }
 
@@ -116,7 +138,7 @@ mod tests {
             path : "/".to_string(),
             headers: None,
         };
-        let request = Request::from_string("GET / HTTP/1.1\r\n\r\n").expect("Error Parsing");
+        let request = Request::from_string("GET / HTTP/1.1\r\n\r\n".to_owned()).expect("Error Parsing");
         assert_eq!(expected, request);
     }
 
@@ -128,13 +150,13 @@ mod tests {
             path : "/".to_string(),
             headers: Some(vec!["Header1: hi".to_string(), "Header2: Bye".to_string()]),
         };
-        let request = Request::from_string("GET / HTTP/1.1\r\nHeader1: hi\r\nHeader2: Bye\r\n\r\n").expect("Error Parsing");
+        let request = Request::from_string("GET / HTTP/1.1\r\nHeader1: hi\r\nHeader2: Bye\r\n\r\n".to_owned()).expect("Error Parsing");
         assert_eq!(expected, request);
     }
 
     #[test]
     fn empty_string() {
-        let request = Request::from_string("");
+        let request = Request::from_string("".to_owned());
         if let Err(error) = request {
             if error == Error::InvalidString {
                 assert!(true);
