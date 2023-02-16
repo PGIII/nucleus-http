@@ -33,6 +33,17 @@ impl Version {
             Version::V2_0 => "HTTP/2 200 OK\r\n".to_owned(), 
         }
     }
+
+    pub fn error(&self, code: u32, message: &str) -> String {
+        return format!("{} {} {}\r\n", self.to_string(), code, message);
+    }
+
+    pub fn to_string(&self) -> String {
+        match self {
+            Version::V1_1 => "HTTP/1.1".to_owned(),
+            Version::V2_0 => "HTTP/2".to_owned(), 
+        }
+    }
 }
 
 impl Request {
