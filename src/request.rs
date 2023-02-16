@@ -27,27 +27,17 @@ pub enum Error {
 }
 
 impl Request {
-    //FIXME: need to check blank line is present
-    pub fn from_string(request_str: &str) -> Result<Request, Error> {
-        //Make sure its not an empty string and has at least one line
-        if request_str.len() == 0 {
-            return Err(Error::InvalidString);
-        }
-
+    pub fn from_lines(lines: Vec<&str>) -> Result<Request, Error> {
         let method;
         let version;
         let path;
         let mut headers = None;
-        let blank_line_split: Vec<&str> = request_str.split("\r\n\r\n").collect();
-        let lines: Vec<&str> = blank_line_split[0].split("\r\n").collect();
+
         let request_seperated: Vec<&str> = lines[0].split(" ").collect();//First line is request
         if  request_seperated.len() < 3 {
             return Err(Error::InvalidString);
         }
 
-        if blank_line_split.len() == 1 {
-            return Err(Error::MissingBlankLine);
-        }
         //First is method
         match request_seperated[0] {
             "GET" => method = Method::GET,
@@ -82,6 +72,21 @@ impl Request {
             path,
             headers,
         })      
+    }
+
+    pub fn from_string(request_str: &str) -> Result<Request, Error> {
+        //Make sure its not an empty string and has at least one line
+        if request_str.len() == 0 {
+            return Err(Error::InvalidString);
+        }
+
+        let blank_line_split: Vec<&str> = request_str.split("\r\n\r\n").collect();
+        let lines: Vec<&str> = blank_line_split[0].split("\r\n").collect();
+
+        if blank_line_split.len() == 1 {
+            return Err(Error::MissingBlankLine);
+        }
+        return Request::from_lines(lines)
     }
 }
 
