@@ -27,17 +27,6 @@ pub enum Error {
 }
 
 impl Version {
-    pub fn ok(&self) -> String {
-        match self {
-            Version::V1_1 => "HTTP/1.1 200 OK\r\n".to_owned(),
-            Version::V2_0 => "HTTP/2 200 OK\r\n".to_owned(), 
-        }
-    }
-
-    pub fn error(&self, code: u32, message: &str) -> String {
-        return format!("{} {} {}\r\n", self.to_string(), code, message);
-    }
-
     pub fn to_string(&self) -> String {
         match self {
             Version::V1_1 => "HTTP/1.1".to_owned(),
@@ -47,6 +36,18 @@ impl Version {
 }
 
 impl Request {
+
+    pub fn ok(&self) -> String {
+        match self.version {
+            Version::V1_1 => "HTTP/1.1 200 OK\r\n".to_owned(),
+            Version::V2_0 => "HTTP/2 200 OK\r\n".to_owned(), 
+        }
+    }
+
+    pub fn error(&self, code: u32, message: &str) -> String {
+        return format!("{} {} {}\r\n", self.version.to_string(), code, message);
+    }
+
     pub fn method(&self) -> Method {
         self.method
     }
@@ -58,7 +59,7 @@ impl Request {
     pub fn version(&self) -> Version {
         self.version
     }
-
+    
     pub fn from_lines(lines: &Vec<String>) -> Result<Request, Error> {
         let method;
         let version;

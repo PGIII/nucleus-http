@@ -14,26 +14,21 @@ async fn main() -> tokio::io::Result<()> {
 
         tokio::spawn(async move {
             let mut buf_reader = tokio::io::BufReader::new(&mut stream);
-            let mut lines = vec![];
+            let mut request_str = "".to_owned();
             loop {
                 let mut line: String = "".to_string();
                 let result = buf_reader.read_line(&mut line).await;
                 match result {
                     Ok(_) => {
+                        request_str += &line;
                         if &line == "\r\n" {
                             break;
-                        } else {
-                            if line.ends_with("\r\n") {
-                                line.pop();
-                                line.pop();
-                            }
-                            lines.push(line);
-                        }
+                        } 
                     },
                     Err(_) => {break;}
                 }
             }
-            let request_result = request::Request::from_lines(&lines);
+            let request_result = request::Request::from_string(request_str);
             match request_result {
                 Ok(r) => {
                     match r.method() {
@@ -45,7 +40,6 @@ async fn main() -> tokio::io::Result<()> {
                     }
                 },
                 Err(e) => {
-                    dbg!(lines);
                     dbg!(e);
                     match e {
                         _ => {

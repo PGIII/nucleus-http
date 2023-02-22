@@ -21,10 +21,10 @@ pub fn handle(r: &request::Request) -> String {
     //try to read file, 404 if not found
     if let Ok(contents) = fs::read_to_string(file_name) {
         body = contents;
-        status = r.version().ok();
+        status = r.ok();
     } else {
         body = fs::read_to_string("404.html").unwrap();
-        status = r.version().ok();
+        status = r.ok();
     }
 
     let length = body.len();
