@@ -19,7 +19,7 @@ async fn main() -> tokio::io::Result<()> {
                 let mut line: String = "".to_string();
                 let result = buf_reader.read_line(&mut line).await;
                 match result {
-                    Ok(size) => {
+                    Ok(_) => {
                         if &line == "\r\n" {
                             break;
                         } else {
@@ -57,7 +57,6 @@ async fn main() -> tokio::io::Result<()> {
             }
         });
     }
-    Ok(())
 }
 
 
