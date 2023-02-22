@@ -59,7 +59,7 @@ impl Request {
         self.version
     }
 
-    pub fn from_lines(lines: Vec<String>) -> Result<Request, Error> {
+    pub fn from_lines(lines: &Vec<String>) -> Result<Request, Error> {
         let method;
         let version;
         let path;
@@ -119,7 +119,7 @@ impl Request {
             return Err(Error::MissingBlankLine);
         }
         let lines_string:Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
-        return Request::from_lines(lines_string);
+        return Request::from_lines(&lines_string);
     }
 }
 

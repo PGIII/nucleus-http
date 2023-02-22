@@ -5,7 +5,7 @@ use std::{
     fs
 };
 
-pub fn handle(r: &request::Request, mut stream: &TcpStream) {
+pub fn handle(r: &request::Request) -> String {
     //Check path and send correct file
     let file_name;
     if r.path() == "/" {
@@ -29,5 +29,5 @@ pub fn handle(r: &request::Request, mut stream: &TcpStream) {
 
     let length = body.len();
     let response = format!("{status}Content-Length: {length}\r\n\r\n{body}");
-    stream.write_all(response.as_bytes()).unwrap();
+    return response;
 }
