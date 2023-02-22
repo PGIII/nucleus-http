@@ -1,15 +1,18 @@
 use std::{
     net::{TcpListener, TcpStream}, 
     io::{prelude::*, BufReader}, 
-    fs
 };
-use rust_web_server::thread_pool::ThreadPool;
-use rust_web_server::request;
+use rust_web_server::{
+    thread_pool::ThreadPool,
+    request,
+    methods
+};
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
     let pool = ThreadPool::new(10);
-
+    
+    println!("Running On localhost:7878");
     for stream in listener.incoming() {
         let stream = stream.unwrap();
         
@@ -31,32 +34,7 @@ fn handle_connnection(mut stream: TcpStream) {
     match request_result {
         Ok(r) => {
             match r.method() {
-                request::Method::GET => {
-                    //Check path and send correct file
-                    let file_name;
-                    if r.path() == "/" {
-                        //Send Index.html
-                        file_name = "index.html";
-                    } else {
-                        file_name = r.path();
-                    }
-
-                    let body;
-                    let status;
-
-                    //try to read file, 404 if not found
-                    if let Ok(contents) = fs::read_to_string(file_name) {
-                        body = contents;
-                        status = r.version().ok();
-                    } else {
-                        body = fs::read_to_string("404.html").unwrap();
-                        status = r.version().ok();
-                    }
-
-                    let length = body.len();
-                    let response = format!("{status}Content-Length: {length}\r\n\r\n{body}");
-                    stream.write_all(response.as_bytes()).unwrap();
-                },
+                request::Method::GET => methods::get::handle(&r, &stream),
                 request::Method::POST => {},
             }
         },
