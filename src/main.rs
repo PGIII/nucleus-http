@@ -7,7 +7,7 @@ use tokio::{self, io::{AsyncBufReadExt, AsyncWriteExt}};
 
 #[tokio::main]
 async fn main() -> tokio::io::Result<()> {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:7878").await?;
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:7878").await?;
 
     loop {
         let (mut stream, _) = listener.accept().await?;
@@ -20,11 +20,14 @@ async fn main() -> tokio::io::Result<()> {
                 let result = buf_reader.read_line(&mut line).await;
                 match result {
                     Ok(size) => {
-                        println!("Got Line {} size: {}", line, size);
-                        let is_blank_line = &line == "\r\n";
-                        lines.push(line);
-                        if size == 0  || is_blank_line {
+                        if &line == "\r\n" {
                             break;
+                        } else {
+                            if line.ends_with("\r\n") {
+                                line.pop();
+                                line.pop();
+                            }
+                            lines.push(line);
                         }
                     },
                     Err(_) => {break;}
@@ -33,7 +36,6 @@ async fn main() -> tokio::io::Result<()> {
             let request_result = request::Request::from_lines(&lines);
             match request_result {
                 Ok(r) => {
-                    println!("matching request {:?}",r);
                     match r.method() {
                         request::Method::GET => {
                             let response = methods::get::handle(&r);
