@@ -60,7 +60,7 @@ impl Server {
                 let request_result = request::Request::from_string(request_str);
                 match request_result {
                     Ok(r) => {
-                        let response = routes.read().await.run(&r);
+                        let response = routes.read().await.run(&r).await;
                         stream.write_all(response.as_bytes()).await.unwrap();
                     }
                     Err(e) => {

@@ -1,4 +1,4 @@
-use crate::{request, request::Method};
+use crate::{request, request::Method, methods};
 
 type ResolveFunction = fn(&request::Request) -> String;
 pub enum RouteResolver {
@@ -50,7 +50,7 @@ impl Routes {
             }
         }
     }    
-    pub fn run(&self, request: &request::Request) -> String {
+    pub async fn run(&self, request: &request::Request) -> String {
         let path: &str = request.path();
         match request.method() {
             Method::GET => {
@@ -59,7 +59,7 @@ impl Routes {
                         println!("Found Get Route: {0}", path);
                         match &route.resolver {
                             RouteResolver::Static { file_path } => {
-                                return "IMPLEMENT ME".to_owned();
+                                return methods::get::load_file(request, file_path).await;
                             }
                             RouteResolver::Function(func) => {
                                 return func(request);
@@ -67,11 +67,11 @@ impl Routes {
                         }
                     }
                 }
+                return methods::get::response("<h1>404 File Not Found</h1>".to_string(), request.error(404, "Not Found"));
             },
             Method::POST => {
                 return "IMPLEMENT ME".to_owned();
             }
         }
-        return "MAKE THIS A RESULT".to_owned();
     }
 }
