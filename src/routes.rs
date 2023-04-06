@@ -34,6 +34,10 @@ impl Route {
         let vhost = vhost;
         Route { path, resolver, method, vhost}
     }
+
+    pub fn vhost(&self) -> &Option<VirtualHost> {
+        return &self.vhost;
+    }
 }
 
 impl Routes {
@@ -43,6 +47,7 @@ impl Routes {
             post: vec![],
         }
     }
+    
     pub fn add(&mut self, route: Route) {
         match route.method {
             Method::GET => {
@@ -56,7 +61,6 @@ impl Routes {
 
     /// runs router returning a response that should be forwarded to client
     pub async fn run(&self, request: &request::Request) -> String {
-        let path: &str = request.path();
         match request.method() {
             Method::GET => {
                 for route in &self.get {
@@ -78,8 +82,15 @@ impl Routes {
             }
         }
     }
+
     fn routes_request_match(request: &Request, route: &Route) -> bool {
         let path_match = request.path() == route.path;
-        return path_match;  
+        let host_match; 
+        if let Some(vhost) = route.vhost() {
+            host_match = request.hostname() == vhost.hostname();
+        } else {
+            host_match = true;
+        }
+        return path_match && host_match;  
     }
 }

@@ -15,4 +15,7 @@ impl VirtualHost {
         };
         return vhost;
     }
+    pub fn hostname(&self) -> &str {
+        &self.hostname
+    }
 }
