@@ -1,7 +1,5 @@
 use crate::request;
 use std::{
-    net::{TcpStream}, 
-    io::{prelude::*}, 
     fs
 };
 
@@ -17,7 +15,7 @@ pub fn handle(r: &request::Request) -> String {
 
     let body;
     let status;
-
+    
     //try to read file, 404 if not found
     if let Ok(contents) = fs::read_to_string(file_name) {
         body = contents;
