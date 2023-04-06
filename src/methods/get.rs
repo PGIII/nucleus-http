@@ -29,3 +29,9 @@ pub fn handle(r: &request::Request) -> String {
     let response = format!("{status}Content-Length: {length}\r\n\r\n{body}");
     return response;
 }
+
+pub fn response(body: String, status: String) -> String {
+    let length = body.len();
+    let response = format!("{status}Content-Length: {length}\r\n\r\n{body}");
+    return response;
+}
