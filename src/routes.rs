@@ -1,4 +1,4 @@
-use crate::{request, request::Method, methods};
+use crate::{request, request::{Method, Request}, methods, virtual_host::VirtualHost};
 
 type ResolveFunction = fn(&request::Request) -> String;
 pub enum RouteResolver {
@@ -7,6 +7,7 @@ pub enum RouteResolver {
 }
 
 pub struct Route {
+    vhost: Option<VirtualHost>, // no Vhost means it applies to all vhost
     method: Method,
     path: String,
     resolver: RouteResolver,
@@ -20,16 +21,18 @@ pub struct Routes {
 
 impl Route {
     //FIXME: combine these two using generics
-    pub fn get(path: String, resolve_func: ResolveFunction) -> Route {
+    pub fn get(path: String, resolve_func: ResolveFunction, vhost: Option<VirtualHost>) -> Route {
         let method = Method::GET;
         let resolver = RouteResolver::Function(resolve_func);
-        Route { path, resolver, method }
+        let vhost = vhost;
+        Route { path, resolver, method, vhost}
     }
 
-    pub fn get_static(path: String, file_path: String) -> Route {
+    pub fn get_static(path: String, file_path: String, vhost: Option<VirtualHost>) -> Route {
         let method = Method::GET;
         let resolver = RouteResolver::Static{file_path};
-        Route { path, resolver, method }
+        let vhost = vhost;
+        Route { path, resolver, method, vhost}
     }
 }
 
@@ -50,13 +53,14 @@ impl Routes {
             }
         }
     }    
+
+    /// runs router returning a response that should be forwarded to client
     pub async fn run(&self, request: &request::Request) -> String {
         let path: &str = request.path();
         match request.method() {
             Method::GET => {
                 for route in &self.get {
-                    if route.path == path {
-                        println!("Found Get Route: {0}", path);
+                    if Self::routes_request_match(request, &route) {
                         match &route.resolver {
                             RouteResolver::Static { file_path } => {
                                 return methods::get::load_file(request, file_path).await;
@@ -73,5 +77,9 @@ impl Routes {
                 return "IMPLEMENT ME".to_owned();
             }
         }
+    }
+    fn routes_request_match(request: &Request, route: &Route) -> bool {
+        let path_match = request.path() == route.path;
+        return path_match;  
     }
 }

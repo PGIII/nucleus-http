@@ -3,6 +3,7 @@ pub struct Request {
     method: Method,
     path: String,
     version: Version,
+    host: String,
     headers: Option<Vec<String>>,
 }
 
@@ -14,6 +15,8 @@ pub enum Method {
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum Version {
+    V0_9,
+    V1_0,
     V1_1,
     V2_0,
 }
@@ -24,23 +27,27 @@ pub enum Error {
     InvalidMethod,
     InvalidHTTPVersion,
     MissingBlankLine,
+    NoHostHeader,
 }
 
 impl Version {
     pub fn to_string(&self) -> String {
         match self {
+            Version::V0_9 => "".to_owned(),
+            Version::V1_0 => "HTTP/1.0".to_owned(),
             Version::V1_1 => "HTTP/1.1".to_owned(),
-            Version::V2_0 => "HTTP/2".to_owned(), 
+            Version::V2_0 => "HTTP/2".to_owned(),
         }
     }
 }
 
 impl Request {
-
     pub fn ok(&self) -> String {
         match self.version {
+            Version::V0_9 => "200 OK\r\n".to_owned(),
+            Version::V1_0 => "HTTP/1.0 200 OK\r\n".to_owned(),
             Version::V1_1 => "HTTP/1.1 200 OK\r\n".to_owned(),
-            Version::V2_0 => "HTTP/2 200 OK\r\n".to_owned(), 
+            Version::V2_0 => "HTTP/2 200 OK\r\n".to_owned(),
         }
     }
 
@@ -59,15 +66,40 @@ impl Request {
     pub fn version(&self) -> Version {
         self.version
     }
-    
+
+    pub fn hostname(&self) -> &str {
+        &self.host
+    }
+
+    pub fn get_header_value(&self, header_name: &str) -> Option<String> {
+        return Self::header_value(&self.headers, header_name);
+    }
+
+    pub fn header_value(headers: &Option<Vec<String>>, header_name: &str) -> Option<String> {
+        let mut value = None;
+        if let Some(header_vec) = headers {
+            for header in header_vec {
+                let split: Vec<&str> = header.split(":").collect();
+                if split.len() >= 2 {
+                    let key = split[0];
+                    if key == header_name {
+                        value = Some(split[1].to_string());
+                    }
+                }
+            }
+        }
+        return value;
+    }
+
     pub fn from_lines(lines: &Vec<String>) -> Result<Request, Error> {
         let method;
         let version;
         let path;
         let mut headers = None;
+        let host;
 
-        let request_seperated: Vec<&str> = lines[0].split(" ").collect();//First line is request
-        if  request_seperated.len() < 3 {
+        let request_seperated: Vec<&str> = lines[0].split(" ").collect(); //First line is request
+        if request_seperated.len() < 3 {
             return Err(Error::InvalidString);
         }
 
@@ -83,6 +115,7 @@ impl Request {
 
         //third is http Verison
         match request_seperated[2] {
+            "HTTP/1.0" => version = Version::V1_0,
             "HTTP/1.1" => version = Version::V1_1,
             "HTTP/2.2" => version = Version::V2_0,
             _ => return Err(Error::InvalidHTTPVersion),
@@ -98,13 +131,21 @@ impl Request {
             headers = Some(header_string);
         }
 
+        let op_host = Self::header_value(&headers, "Host");
+        if let Some(hostname) = op_host {
+            host = hostname.trim().to_string();
+        } else {
+            //FIXME: should we only error when its > http 1.0????
+            return Err(Error::NoHostHeader);
+        }
         //last is optional headers
-        return Ok(Request { 
+        return Ok(Request {
             method,
             version,
             path,
             headers,
-        })      
+            host,
+        });
     }
 
     pub fn from_string(request_str: String) -> Result<Request, Error> {
@@ -119,7 +160,7 @@ impl Request {
         if blank_line_split.len() == 1 {
             return Err(Error::MissingBlankLine);
         }
-        let lines_string:Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
+        let lines_string: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
         return Request::from_lines(&lines_string);
     }
 }
@@ -134,7 +175,7 @@ mod tests {
         let request = Request::from_string("GET / HTTP1.1\r\n\r\n".to_owned());
         assert_eq!(expected, request);
     }
-    
+
     #[test]
     fn no_blank_line_new() {
         let expected = Err(Error::MissingBlankLine);
@@ -145,24 +186,34 @@ mod tests {
     #[test]
     fn new() {
         let expected = Request {
-            method : Method::GET,
-            version : Version::V1_1,
-            path : "/".to_string(),
-            headers: None,
+            method: Method::GET,
+            version: Version::V1_1,
+            path: "/".to_string(),
+            headers: Some(vec!["Host: test".to_string()]),
+            host: "test".to_string(),
         };
-        let request = Request::from_string("GET / HTTP/1.1\r\n\r\n".to_owned()).expect("Error Parsing");
+        let request = Request::from_string("GET / HTTP/1.1\r\nHost: test\r\n\r\n".to_owned())
+            .expect("Error Parsing");
         assert_eq!(expected, request);
     }
 
     #[test]
     fn new_headers() {
         let expected = Request {
-            method : Method::GET,
-            version : Version::V1_1,
-            path : "/".to_string(),
-            headers: Some(vec!["Header1: hi".to_string(), "Header2: Bye".to_string()]),
+            method: Method::GET,
+            version: Version::V1_1,
+            path: "/".to_string(),
+            headers: Some(vec![
+                "Host: test".to_string(),
+                "Header1: hi".to_string(),
+                "Header2: Bye".to_string(),
+            ]),
+            host: "test".to_string(),
         };
-        let request = Request::from_string("GET / HTTP/1.1\r\nHeader1: hi\r\nHeader2: Bye\r\n\r\n".to_owned()).expect("Error Parsing");
+        let request = Request::from_string(
+            "GET / HTTP/1.1\r\nHost: test\r\nHeader1: hi\r\nHeader2: Bye\r\n\r\n".to_owned(),
+        )
+        .expect("Error Parsing");
         assert_eq!(expected, request);
     }
 

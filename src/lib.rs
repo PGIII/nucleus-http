@@ -3,13 +3,14 @@ use tokio::{
     self,
     io::{AsyncBufReadExt, AsyncWriteExt},
     net::TcpListener,
-    sync::RwLock
+    sync::RwLock,
 };
 
 pub mod methods;
 pub mod request;
 pub mod routes;
 pub mod thread_pool;
+pub mod virtual_host;
 
 pub struct Server {
     listener: TcpListener,
