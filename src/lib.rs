@@ -33,7 +33,6 @@ impl Connection {
 
     pub async fn write_response(&mut self, response: Response) -> tokio::io::Result<()> {
         let response_str: String = response.into();
-        println!("Writing: {response_str}");
         self.write_all(&response_str.into_bytes()).await?;
         Ok(())
     }

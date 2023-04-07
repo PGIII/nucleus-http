@@ -13,7 +13,7 @@ async fn main() -> tokio::io::Result<()> {
     server
         .add_route(Route::get_static(
             "/".to_owned(),
-            "/Users/prestongarrisoniii/dev/source/rust_web_server/".to_string(),
+            "/Users/prestongarrisoniii/dev/source/rust_web_server/index.html".to_string(),
             None,
         ))
         .await;
