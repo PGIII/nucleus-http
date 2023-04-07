@@ -1,4 +1,11 @@
-use crate::{request, request::{Method, Request}, methods, virtual_host::VirtualHost};
+use crate::{
+    http::{Method, StatusCode},
+    request,
+    request::Request,
+    response::Response,
+    virtual_host::VirtualHost,
+};
+use tokio::fs;
 
 type ResolveFunction = fn(&request::Request) -> String;
 pub enum RouteResolver {
@@ -25,14 +32,24 @@ impl Route {
         let method = Method::GET;
         let resolver = RouteResolver::Function(resolve_func);
         let vhost = vhost;
-        Route { path, resolver, method, vhost}
+        Route {
+            path,
+            resolver,
+            method,
+            vhost,
+        }
     }
 
     pub fn get_static(path: String, file_path: String, vhost: Option<VirtualHost>) -> Route {
         let method = Method::GET;
-        let resolver = RouteResolver::Static{file_path};
+        let resolver = RouteResolver::Static { file_path };
         let vhost = vhost;
-        Route { path, resolver, method, vhost}
+        Route {
+            path,
+            resolver,
+            method,
+            vhost,
+        }
     }
 
     pub fn vhost(&self) -> &Option<VirtualHost> {
@@ -47,50 +64,68 @@ impl Routes {
             post: vec![],
         }
     }
-    
+
     pub fn add(&mut self, route: Route) {
         match route.method {
             Method::GET => {
                 self.get.push(route);
-            },
+            }
             Method::POST => {
                 self.post.push(route);
             }
         }
-    }    
+    }
 
     /// runs router returning a response that should be forwarded to client
-    pub async fn run(&self, request: &request::Request) -> String {
+    pub async fn run(&self, request: &request::Request) -> Response {
         match request.method() {
             Method::GET => {
                 for route in &self.get {
                     if Self::routes_request_match(request, &route) {
                         match &route.resolver {
                             RouteResolver::Static { file_path } => {
-                                return methods::get::load_file(request, file_path).await;
+                                let response;
+                                if let Ok(contents) = fs::read_to_string(file_path).await {
+                                    response = Response::from(contents);
+                                } else {
+                                    response = Response::new(
+                                        StatusCode::ErrNotFound,
+                                        "File Not Found".to_string(),
+                                        crate::http::MimeType::PlainText,
+                                        crate::http::Version::V1_1,
+                                    );
+                                }
+                                return response;
                             }
                             RouteResolver::Function(func) => {
-                                return func(request);
+                                let func_return = func(&request);
+                                return Response::from(func_return);
                             }
                         }
                     }
                 }
-                return methods::get::response("<h1>404 File Not Found</h1>".to_string(), request.error(404, "Not Found"));
-            },
+                let response = Response::new(
+                    StatusCode::ErrNotFound,
+                    "File Not Found".to_string(),
+                    crate::http::MimeType::PlainText,
+                    crate::http::Version::V1_1,
+                );
+                return response;
+            }
             Method::POST => {
-                return "IMPLEMENT ME".to_owned();
+                todo!();
             }
         }
     }
 
     fn routes_request_match(request: &Request, route: &Route) -> bool {
         let path_match = request.path() == route.path;
-        let host_match; 
+        let host_match;
         if let Some(vhost) = route.vhost() {
             host_match = request.hostname() == vhost.hostname();
         } else {
             host_match = true;
         }
-        return path_match && host_match;  
+        return path_match && host_match;
     }
 }

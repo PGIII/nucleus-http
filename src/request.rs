@@ -1,3 +1,5 @@
+use crate::http::{Method, Version};
+
 #[derive(PartialEq, Debug)]
 pub struct Request {
     method: Method,
@@ -7,19 +9,6 @@ pub struct Request {
     headers: Option<Vec<String>>,
 }
 
-#[derive(PartialEq, Debug, Clone, Copy)]
-pub enum Method {
-    GET,
-    POST,
-}
-
-#[derive(PartialEq, Debug, Clone, Copy)]
-pub enum Version {
-    V0_9,
-    V1_0,
-    V1_1,
-    V2_0,
-}
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum Error {
@@ -28,17 +17,6 @@ pub enum Error {
     InvalidHTTPVersion,
     MissingBlankLine,
     NoHostHeader,
-}
-
-impl Version {
-    pub fn to_string(&self) -> String {
-        match self {
-            Version::V0_9 => "".to_owned(),
-            Version::V1_0 => "HTTP/1.0".to_owned(),
-            Version::V1_1 => "HTTP/1.1".to_owned(),
-            Version::V2_0 => "HTTP/2".to_owned(),
-        }
-    }
 }
 
 impl Request {
