@@ -1,6 +1,5 @@
-use std::sync::Arc;
-use http::Version;
 use response::Response;
+use std::sync::Arc;
 use tokio::{
     self,
     io::{AsyncBufReadExt, AsyncWriteExt},
@@ -87,15 +86,19 @@ impl Server {
                 let request_result = request::Request::from_string(request_str);
                 match request_result {
                     Ok(r) => {
-                        let response = routes.read().await.run(&r).await;
+                        let routes_locked = routes.read().await;
+                        let response = routes_locked.run(&r).await;
                         connection.write_response(response).await.unwrap();
                     }
                     Err(e) => {
                         dbg!(e);
                         match e {
                             _ => {
-                                let response = "HTTP/1.1 400 Error\r\n";
-                                connection.write_all(response.as_bytes()).await.unwrap();
+                                let response = Response::error(
+                                    http::StatusCode::ErrBadRequest,
+                                    "400 Bad Request".to_string(),
+                                );
+                                connection.write_response(response).await.unwrap();
                             }
                         }
                     }

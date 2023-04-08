@@ -8,13 +8,24 @@ pub struct Response {
 }
 
 impl Response {
-    pub fn new(status: StatusCode, body: String, mime: MimeType, version: Version) -> Response {
+    pub fn new(status: StatusCode, body: String, mime: MimeType) -> Response {
         let version = Version::V1_1;
         Response {
             status,
             mime,
             body,
             version,
+        }
+    }
+
+    pub fn error(status: StatusCode, body: String) -> Response {
+        let version = Version::V1_1;
+        let mime = MimeType::PlainText;
+        Response {
+            status,
+            body,
+            version,
+            mime
         }
     }
 }
@@ -47,7 +58,7 @@ impl From<Response> for String {
         let length = response.body.len();
         let version: &str = response.version.into();
         let body: &str = &response.body;
-        let response = format!("{version} {status} Content-Length: {length}\r\n\r\n{body}");
+        let response = format!("{version} {status}\r\nContent-Length: {length}\r\n\r\n{body}");
         return response;
     }
 }

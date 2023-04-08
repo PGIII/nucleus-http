@@ -88,11 +88,9 @@ impl Routes {
                                 if let Ok(contents) = fs::read_to_string(file_path).await {
                                     response = Response::from(contents);
                                 } else {
-                                    response = Response::new(
+                                    response = Response::error(
                                         StatusCode::ErrNotFound,
                                         "File Not Found".to_string(),
-                                        crate::http::MimeType::PlainText,
-                                        crate::http::Version::V1_1,
                                     );
                                 }
                                 return response;
@@ -104,12 +102,7 @@ impl Routes {
                         }
                     }
                 }
-                let response = Response::new(
-                    StatusCode::ErrNotFound,
-                    "File Not Found".to_string(),
-                    crate::http::MimeType::PlainText,
-                    crate::http::Version::V1_1,
-                );
+                let response = Response::error(StatusCode::ErrNotFound, "File Not Found".to_string());
                 return response;
             }
             Method::POST => {

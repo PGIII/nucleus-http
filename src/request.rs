@@ -1,4 +1,4 @@
-use crate::http::{Method, Version};
+use crate::http::{Header, Method, Version};
 
 #[derive(PartialEq, Debug)]
 pub struct Request {
@@ -6,9 +6,8 @@ pub struct Request {
     path: String,
     version: Version,
     host: String,
-    headers: Option<Vec<String>>,
+    headers: Vec<Header>,
 }
-
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum Error {
@@ -53,27 +52,20 @@ impl Request {
         return Self::header_value(&self.headers, header_name);
     }
 
-    pub fn header_value(headers: &Option<Vec<String>>, header_name: &str) -> Option<String> {
-        let mut value = None;
-        if let Some(header_vec) = headers {
-            for header in header_vec {
-                let split: Vec<&str> = header.split(":").collect();
-                if split.len() >= 2 {
-                    let key = split[0];
-                    if key == header_name {
-                        value = Some(split[1].to_string());
-                    }
-                }
+    pub fn header_value(headers: &Vec<Header>, header_name: &str) -> Option<String> {
+        for header in headers {
+            if header.key == header_name {
+                return Some(header.value.to_owned());
             }
         }
-        return value;
+        return None;
     }
 
     pub fn from_lines(lines: &Vec<String>) -> Result<Request, Error> {
         let method;
         let version;
         let path;
-        let mut headers = None;
+        let mut headers = vec![];
         let host;
 
         let request_seperated: Vec<&str> = lines[0].split(" ").collect(); //First line is request
@@ -102,16 +94,19 @@ impl Request {
         //4th is optional headers
         if lines.len() > 1 {
             //FIXME: Dont we need to collect here?
-            let mut header_string = vec![];
             for i in 1..lines.len() {
-                header_string.push(lines[i].to_string());
+                if let Ok(header) = Header::try_from(&lines[i]) {
+                    headers.push(header);
+                }
+                //headers.push(lines[i].to_string());
             }
-            headers = Some(header_string);
         }
 
         let op_host = Self::header_value(&headers, "Host");
         if let Some(hostname) = op_host {
-            host = hostname.trim().to_string();
+            // get rid if port if its included in host name
+            let hostname_only: Vec<&str> = hostname.split(":").collect();
+            host = hostname_only[0].to_string();
         } else {
             //FIXME: should we only error when its > http 1.0????
             return Err(Error::NoHostHeader);
@@ -167,7 +162,10 @@ mod tests {
             method: Method::GET,
             version: Version::V1_1,
             path: "/".to_string(),
-            headers: Some(vec!["Host: test".to_string()]),
+            headers: vec![Header {
+                key: "Host".to_string(),
+                value: "test".to_string(),
+            }],
             host: "test".to_string(),
         };
         let request = Request::from_string("GET / HTTP/1.1\r\nHost: test\r\n\r\n".to_owned())
@@ -181,11 +179,20 @@ mod tests {
             method: Method::GET,
             version: Version::V1_1,
             path: "/".to_string(),
-            headers: Some(vec![
-                "Host: test".to_string(),
-                "Header1: hi".to_string(),
-                "Header2: Bye".to_string(),
-            ]),
+            headers: vec![
+                Header {
+                    key: "Host".to_string(),
+                    value: "test".to_string(),
+                },
+                Header {
+                    key: "Header1".to_string(),
+                    value: "hi".to_string(),
+                },
+                Header {
+                    key: "Header2".to_string(),
+                    value: "Bye".to_string(),
+                },
+            ],
             host: "test".to_string(),
         };
         let request = Request::from_string(

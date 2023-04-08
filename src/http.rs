@@ -22,15 +22,53 @@ pub enum StatusCode {
     ErrForbidden = 403,
     ErrNotFound = 404,
     ErrInternalServer = 500,
-
 }
 
 pub enum MimeType {
     PlainText,
 }
 
+/// HTTP headers are simple key value pairs both strings
+#[derive(Debug, PartialEq)]
+pub struct Header {
+    pub key: String,
+    pub value: String,
+}
+
+impl TryFrom<String> for Header {
+    type Error = &'static str;
+    fn try_from(string: String) -> Result<Self, Self::Error> {
+        let split: Vec<&str> = string.split(": ").collect();
+        if split.len() == 2 {
+            let key = split[0].to_string();
+            let value = split[1].to_string();
+            return Ok(Self { key, value });
+        } else if split.len() > 2 {
+            Err("Too many ': '")
+        } else {
+            Err("Invalid Key Value Pair")
+        }
+    }
+}
+
+impl TryFrom<&String> for Header {
+    type Error = &'static str;
+    fn try_from(string: &String) -> Result<Self, Self::Error> {
+        let split: Vec<&str> = string.split(": ").collect();
+        if split.len() == 2 {
+            let key = split[0].to_string();
+            let value = split[1].to_string();
+            return Ok(Self { key, value });
+        } else if split.len() > 2 {
+            Err("Too many ': '")
+        } else {
+            Err("Invalid Key Value Pair")
+        }
+    }
+}
+
 impl From<StatusCode> for &str {
-   fn from(status: StatusCode) -> &'static str {
+    fn from(status: StatusCode) -> &'static str {
         match status {
             StatusCode::Continue => "100 Continue",
             StatusCode::OK => "200 OK",
@@ -40,7 +78,7 @@ impl From<StatusCode> for &str {
             StatusCode::ErrNotFound => "404 Not Found",
             _ => "500 Internal Server Error",
         }
-    } 
+    }
 }
 
 impl From<StatusCode> for String {
