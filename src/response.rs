@@ -1,10 +1,11 @@
-use crate::http::{MimeType, StatusCode, Version};
+use crate::http::{Header, MimeType, StatusCode, Version};
 
 pub struct Response {
     version: Version,
     status: StatusCode,
     body: String, //for now only string, but could be other types eg. byte array
     mime: MimeType,
+    headers: Vec<Header>,
 }
 
 impl Response {
@@ -15,6 +16,7 @@ impl Response {
             mime,
             body,
             version,
+            headers: Header::new_server(),
         }
     }
 
@@ -25,7 +27,8 @@ impl Response {
             status,
             body,
             version,
-            mime
+            mime,
+            headers: Header::new_server(),
         }
     }
 }
@@ -37,6 +40,7 @@ impl From<String> for Response {
             body: string,
             mime: MimeType::PlainText,
             version: Version::V1_1,
+            headers: Header::new_server(),
         }
     }
 }
@@ -48,6 +52,7 @@ impl From<&str> for Response {
             body: string.to_string(),
             mime: MimeType::PlainText,
             version: Version::V1_1,
+            headers: Header::new_server(),
         }
     }
 }
@@ -58,7 +63,20 @@ impl From<Response> for String {
         let length = response.body.len();
         let version: &str = response.version.into();
         let body: &str = &response.body;
-        let response = format!("{version} {status}\r\nContent-Length: {length}\r\n\r\n{body}");
+        let content_type: String = response.mime.into();
+        let mut headers_string = "".to_string();
+        for header in response.headers {
+            let header_string: String = header.into();
+            headers_string.push_str(&header_string);
+            headers_string.push_str("\r\n");
+        }
+        let response = format!(
+            "{version} {status}\r\n\
+            Content-Length: {length}\r\n\
+            Content-Type: {content_type}\r\n\
+            {headers_string}\r\n\
+            {body}"
+        );
         return response;
     }
 }

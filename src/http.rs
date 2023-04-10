@@ -25,7 +25,7 @@ pub enum StatusCode {
 }
 
 pub enum MimeType {
-    PlainText,
+    PlainText
 }
 
 /// HTTP headers are simple key value pairs both strings
@@ -33,6 +33,37 @@ pub enum MimeType {
 pub struct Header {
     pub key: String,
     pub value: String,
+}
+
+impl From<MimeType> for String {
+    fn from(mime:MimeType) -> String {
+        let media_type = mime.media_type();
+        let charset = mime.charset();
+        let boundary = mime.boundary();
+        if let Some(boundary) = boundary {
+            format!("{}; charset={}; boundary={}", media_type, charset, boundary)
+        } else {
+            format!("{}; charset={}", media_type, charset)
+        }
+    }
+}
+
+impl MimeType {
+    pub fn media_type(&self) -> &str {
+        match self {
+            Self::PlainText => "text/html"
+        }
+    }
+    pub fn charset(&self) -> &str {
+        match self {
+            Self::PlainText => "utf-8"
+        }
+    }
+    pub fn boundary(&self) -> Option<&str> {
+        match self {
+            Self::PlainText => None
+        }
+    }
 }
 
 impl TryFrom<String> for Header {
@@ -64,6 +95,27 @@ impl TryFrom<&String> for Header {
         } else {
             Err("Invalid Key Value Pair")
         }
+    }
+}
+
+impl From<Header> for String {
+    fn from(header: Header) -> String {
+        return format!("{}: {}", header.key, header.value); 
+    }
+}
+
+impl Header {
+
+    pub fn new(key: &str, value: &str) -> Header {
+        Header { key: key.to_string(), value: value.to_string() }
+    }
+    /// Create new vector of headers for server
+    pub fn new_server() -> Vec<Header> {
+        const VERSION: &str = env!("CARGO_PKG_VERSION");
+        const NAME: &str = env!("CARGO_PKG_NAME");
+        return vec![
+            Header {key: "Server".to_string(), value: format!("{NAME} {VERSION}").to_string()}
+        ];
     }
 }
 

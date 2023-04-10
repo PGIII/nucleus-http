@@ -1,5 +1,5 @@
-use rust_web_server::{
-    methods, request::Request, routes::Route, virtual_host::VirtualHost, Server,
+use nucleus_http::{
+    request::Request, routes::Route, virtual_host::VirtualHost, Server,
 };
 use tokio;
 
@@ -13,7 +13,7 @@ async fn main() -> tokio::io::Result<()> {
     server
         .add_route(Route::get_static(
             "/".to_owned(),
-            "/Users/prestongarrisoniii/dev/source/rust_web_server/index.html".to_string(),
+            "/Users/prestongarrisoniii/dev/source/nucleus-http/index.html".to_string(),
             None,
         ))
         .await;
@@ -36,7 +36,7 @@ async fn run_server2() {
     server2
         .add_route(Route::get_static(
             "/".to_owned(),
-            "/Users/prestongarrisoniii/dev/source/rust_web_server/index.html".to_string(),
+            "/Users/prestongarrisoniii/dev/source/nucleus-http/index.html".to_string(),
             None,
         ))
         .await;
