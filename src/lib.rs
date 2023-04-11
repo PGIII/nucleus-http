@@ -148,7 +148,7 @@ impl Server {
                 if let Some(file_name) = PathBuf::from(request.path()).file_name() {
                     let path = vhost.root_dir().join(file_name);
                     return Self::get_file(path).await;
-                } 
+                }
             }
         }
 
