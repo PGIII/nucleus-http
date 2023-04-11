@@ -135,26 +135,42 @@ impl Server {
     async fn route(request: &Request, connection: &Connection) -> Response {
         let routes = connection.routes();
         let routes_locked = routes.read().await;
+
         for route in &*routes_locked {
             if Self::routes_request_match(request, &route) {
-                if let routes::RouteResolver::Function(func) = route.resolver() {
-                    let func_return = func(&request);
-                    return Response::from(func_return);
+                match route.resolver() {
+                    routes::RouteResolver::Function(func) => {
+                        let func_return = func(&request);
+                        return Response::from(func_return);
+                    }
+                    routes::RouteResolver::Static { file_path } => {
+                        if let Some(host_dir) = Self::get_vhost_dir(request, connection).await {
+                                let path = host_dir.join(file_path);
+                                return Self::get_file(path).await;
+                        }
+                    }
                 }
             }
         }
-        for vhost in &*connection.virtual_hosts().read().await {
-            if vhost.hostname() == request.hostname() {
-                if let Some(file_name) = PathBuf::from(request.path()).file_name() {
-                    let path = vhost.root_dir().join(file_name);
-                    return Self::get_file(path).await;
-                }
+        if let Some(host_dir) = Self::get_vhost_dir(request, connection).await {
+            if let Some(file_name) = PathBuf::from(request.path()).file_name() {
+                let path = host_dir.join(file_name);
+                return Self::get_file(path).await;
             }
         }
 
         //no route try static serve
         let response = Response::error(http::StatusCode::ErrNotFound, "File Not Found".to_string());
         return response;
+    }
+
+    async fn get_vhost_dir(request: &Request, connection: &Connection) -> Option<PathBuf> {
+        for vhost in &*connection.virtual_hosts().read().await {
+            if vhost.hostname() == request.hostname() {
+                return Some(vhost.root_dir().to_path_buf());
+            }
+        }
+        return None;
     }
 
     async fn get_file(path: PathBuf) -> Response {
