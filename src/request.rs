@@ -32,8 +32,8 @@ impl Request {
         return format!("{} {} {}\r\n", self.version.to_string(), code, message);
     }
 
-    pub fn method(&self) -> Method {
-        self.method
+    pub fn method(&self) -> &Method {
+        &self.method
     }
 
     pub fn path(&self) -> &str {

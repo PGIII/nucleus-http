@@ -1,3 +1,4 @@
+use request::Request;
 use response::Response;
 use std::sync::Arc;
 use tokio::{
@@ -5,6 +6,7 @@ use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::RwLock,
+    fs
 };
 
 pub mod http;
@@ -17,7 +19,7 @@ pub mod virtual_host;
 
 pub struct Server {
     listener: TcpListener,
-    routes: Arc<RwLock<routes::Routes>>,
+    routes: Arc<RwLock<Vec<routes::Route>>>,
 }
 
 pub struct Connection {
@@ -40,18 +42,18 @@ impl Connection {
 impl Server {
     pub async fn add_route(&mut self, route: routes::Route) {
         let mut routes_locked = self.routes.write().await;
-        routes_locked.add(route);
+        routes_locked.push(route);
     }
 
     pub async fn bind(ip: &str) -> Result<Server, tokio::io::Error> {
         let listener = tokio::net::TcpListener::bind(ip).await?;
         Ok(Server {
             listener,
-            routes: Arc::new(RwLock::new(routes::Routes::new())),
+            routes: Arc::new(RwLock::new(vec![])),
         })
     }
 
-    pub fn routes(&self) -> Arc<RwLock<routes::Routes>> {
+    pub fn routes(&self) -> Arc<RwLock<Vec<routes::Route>>> {
         return Arc::clone(&self.routes);
     }
 
@@ -86,8 +88,7 @@ impl Server {
                 let request_result = request::Request::from_string(request_str);
                 match request_result {
                     Ok(r) => {
-                        let routes_locked = routes.read().await;
-                        let response = routes_locked.run(&r).await;
+                        let response = Self::route(&r, routes).await;
                         connection.write_response(response).await.unwrap();
                     }
                     Err(e) => {
@@ -105,5 +106,45 @@ impl Server {
                 }
             });
         }
+    }
+
+    async fn route(request: &Request, routes: Arc<RwLock<Vec<routes::Route>>>) -> Response {
+        let routes_locked = routes.read().await; 
+        for route in &*routes_locked {
+            if Self::routes_request_match(request, &route) {
+                match route.resolver() {
+                    routes::RouteResolver::Static { file_path } => {
+                        let response;
+                        if let Ok(contents) = fs::read_to_string(file_path).await {
+                            response = Response::from(contents);
+                        } else {
+                            response = Response::error(
+                                http::StatusCode::ErrNotFound,
+                                "File Not Found".to_string(),
+                            );
+                        }
+                        return response;
+                    }
+                    routes::RouteResolver::Function(func) => {
+                        let func_return = func(&request);
+                        return Response::from(func_return);
+                    }
+                }
+            }
+        }
+        let response = Response::error(http::StatusCode::ErrNotFound, "File Not Found".to_string());
+        return response;
+    }
+
+    fn routes_request_match(request: &Request, route: &routes::Route) -> bool {
+        let path_match = request.path() == route.path();
+        let host_match;
+        let methods_match = request.method() == route.method();
+        if let Some(vhost) = route.vhost() {
+            host_match = request.hostname() == vhost.hostname();
+        } else {
+            host_match = true;
+        }
+        return methods_match && path_match && host_match;
     }
 }
