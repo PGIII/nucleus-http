@@ -1,12 +1,12 @@
 use request::Request;
 use response::Response;
-use std::sync::Arc;
+use routes::Routes;
+use std::{path::PathBuf, sync::Arc};
 use tokio::{
-    self,
+    self, fs,
     io::{AsyncBufReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::RwLock,
-    fs
 };
 
 pub mod http;
@@ -19,11 +19,14 @@ pub mod virtual_host;
 
 pub struct Server {
     listener: TcpListener,
-    routes: Arc<RwLock<Vec<routes::Route>>>,
+    routes: Routes,
+    virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
 }
 
 pub struct Connection {
     stream: TcpStream,
+    routes: Routes,
+    virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
 }
 
 impl Connection {
@@ -36,6 +39,14 @@ impl Connection {
         let response_str: String = response.into();
         self.write_all(&response_str.into_bytes()).await?;
         Ok(())
+    }
+
+    pub fn routes(&self) -> Routes {
+        return self.routes.clone();
+    }
+
+    pub fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>> {
+        return self.virtual_hosts.clone();
     }
 }
 
@@ -50,21 +61,34 @@ impl Server {
         Ok(Server {
             listener,
             routes: Arc::new(RwLock::new(vec![])),
+            virtual_hosts: Arc::new(RwLock::new(vec![])),
         })
     }
 
-    pub fn routes(&self) -> Arc<RwLock<Vec<routes::Route>>> {
+    pub fn routes(&self) -> Routes {
         return Arc::clone(&self.routes);
+    }
+
+    pub fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>> {
+        return self.virtual_hosts.clone();
+    }
+    pub async fn add_virtual_host(&mut self, virtual_host: virtual_host::VirtualHost) {
+        let virtual_hosts = self.virtual_hosts();
+        let mut locked = virtual_hosts.write().await;
+        locked.push(virtual_host);
     }
 
     pub async fn accept(&self) -> tokio::io::Result<Connection> {
         let (stream, _) = self.listener.accept().await?;
-        Ok(Connection { stream })
+        Ok(Connection {
+            stream,
+            routes: self.routes(),
+            virtual_hosts: self.virtual_hosts(),
+        })
     }
 
     pub async fn serve(&self) -> tokio::io::Result<()> {
         loop {
-            let routes = self.routes();
             let mut connection = self.accept().await?;
 
             tokio::spawn(async move {
@@ -88,7 +112,7 @@ impl Server {
                 let request_result = request::Request::from_string(request_str);
                 match request_result {
                     Ok(r) => {
-                        let response = Self::route(&r, routes).await;
+                        let response = Self::route(&r, &connection).await;
                         connection.write_response(response).await.unwrap();
                     }
                     Err(e) => {
@@ -108,43 +132,58 @@ impl Server {
         }
     }
 
-    async fn route(request: &Request, routes: Arc<RwLock<Vec<routes::Route>>>) -> Response {
-        let routes_locked = routes.read().await; 
+    async fn route(request: &Request, connection: &Connection) -> Response {
+        let routes = connection.routes();
+        let routes_locked = routes.read().await;
         for route in &*routes_locked {
             if Self::routes_request_match(request, &route) {
-                match route.resolver() {
-                    routes::RouteResolver::Static { file_path } => {
-                        let response;
-                        if let Ok(contents) = fs::read_to_string(file_path).await {
-                            response = Response::from(contents);
-                        } else {
-                            response = Response::error(
-                                http::StatusCode::ErrNotFound,
-                                "File Not Found".to_string(),
-                            );
-                        }
-                        return response;
-                    }
-                    routes::RouteResolver::Function(func) => {
-                        let func_return = func(&request);
-                        return Response::from(func_return);
-                    }
+                if let routes::RouteResolver::Function(func) = route.resolver() {
+                    let func_return = func(&request);
+                    return Response::from(func_return);
                 }
             }
         }
+        for vhost in &*connection.virtual_hosts().read().await {
+            if vhost.hostname() == request.hostname() {
+                if let Some(file_name) = PathBuf::from(request.path()).file_name() {
+                    let path = vhost.root_dir().join(file_name);
+                    return Self::get_file(path).await;
+                } 
+            }
+        }
+
+        //no route try static serve
         let response = Response::error(http::StatusCode::ErrNotFound, "File Not Found".to_string());
         return response;
     }
 
+    async fn get_file(path: PathBuf) -> Response {
+        match fs::read_to_string(path).await {
+            Ok(contents) => {
+                return Response::from(contents);
+            }
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::PermissionDenied => {
+                    let response = Response::error(
+                        http::StatusCode::ErrForbidden,
+                        "Permission Denied".to_string(),
+                    );
+                    return response;
+                }
+                std::io::ErrorKind::NotFound | _ => {
+                    let response = Response::error(
+                        http::StatusCode::ErrNotFound,
+                        "File Not Found".to_string(),
+                    );
+                    return response;
+                }
+            },
+        }
+    }
+
     fn routes_request_match(request: &Request, route: &routes::Route) -> bool {
         let path_match = request.path() == route.path();
-        let host_match;
         let methods_match = request.method() == route.method();
-        if let Some(vhost) = route.vhost() {
-            host_match = request.hostname() == vhost.hostname();
-        } else {
-            host_match = true;
-        }
-        return methods_match && path_match && host_match;
+        return methods_match && path_match;
     }
 }

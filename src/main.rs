@@ -7,21 +7,14 @@ use tokio;
 async fn main() -> tokio::io::Result<()> {
     let listener_ip = "0.0.0.0:7878";
     println!("Listening on {listener_ip}");
-    let localhost_vhost = VirtualHost::new("localhost", "0.0.0.0:7878", "/var/www/default");
+    let localhost_vhost = VirtualHost::new("localhost", "0.0.0.0:7878", "/Users/prestongarrisoniii/dev/source/nucleus-http/");
 
     let mut server = Server::bind(listener_ip).await?;
-    server
-        .add_route(Route::get_static(
-            "/".to_owned(),
-            "/Users/prestongarrisoniii/dev/source/nucleus-http/index.html".to_string(),
-            None,
-        ))
-        .await;
+    server.add_virtual_host(localhost_vhost).await;
     server
         .add_route(Route::get(
             "/locals".to_owned(),
             base_get,
-            Some(localhost_vhost),
         ))
         .await;
 
@@ -37,7 +30,6 @@ async fn run_server2() {
         .add_route(Route::get_static(
             "/".to_owned(),
             "/Users/prestongarrisoniii/dev/source/nucleus-http/index.html".to_string(),
-            None,
         ))
         .await;
     server2.serve().await.unwrap();

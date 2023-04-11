@@ -1,4 +1,6 @@
 use crate::{http::Method, request, virtual_host::VirtualHost};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 type ResolveFunction = fn(&request::Request) -> String;
 
@@ -8,40 +10,36 @@ pub enum RouteResolver {
 }
 
 pub struct Route {
-    vhost: Option<VirtualHost>, // no Vhost means it applies to all vhost
     method: Method,
     path: String,
     resolver: RouteResolver,
 }
 
+pub type Routes = Arc<RwLock<Vec<Route>>>;
+
+pub fn new_routes() -> Routes {
+    Arc::new(RwLock::new(vec![]))
+}
 impl Route {
     //FIXME: combine these two using generics
-    pub fn get(path: String, resolve_func: ResolveFunction, vhost: Option<VirtualHost>) -> Route {
+    pub fn get(path: String, resolve_func: ResolveFunction) -> Route {
         let method = Method::GET;
         let resolver = RouteResolver::Function(resolve_func);
-        let vhost = vhost;
         Route {
             path,
             resolver,
             method,
-            vhost,
         }
     }
 
-    pub fn get_static(path: String, file_path: String, vhost: Option<VirtualHost>) -> Route {
+    pub fn get_static(path: String, file_path: String) -> Route {
         let method = Method::GET;
         let resolver = RouteResolver::Static { file_path };
-        let vhost = vhost;
         Route {
             path,
             resolver,
             method,
-            vhost,
         }
-    }
-
-    pub fn vhost(&self) -> &Option<VirtualHost> {
-        return &self.vhost;
     }
 
     pub fn method(&self) -> &Method {
