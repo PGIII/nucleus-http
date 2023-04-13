@@ -145,8 +145,8 @@ impl Server {
                     }
                     routes::RouteResolver::Static { file_path } => {
                         if let Some(host_dir) = Self::get_vhost_dir(request, connection).await {
-                                let path = host_dir.join(file_path);
-                                return Self::get_file(path).await;
+                            let path = host_dir.join(file_path);
+                            return Self::get_file(path).await;
                         }
                     }
                 }
