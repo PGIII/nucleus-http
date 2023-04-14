@@ -140,7 +140,7 @@ impl Server {
             if Self::routes_request_match(request, &route) {
                 match route.resolver() {
                     routes::RouteResolver::Function(func) => {
-                        let func_return = func(&request);
+                        let func_return = func(&request).await;
                         return Response::from(func_return);
                     }
                     routes::RouteResolver::Static { file_path } => {
