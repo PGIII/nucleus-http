@@ -6,6 +6,7 @@ pub struct Request {
     path: String,
     version: Version,
     host: String,
+    query_string: Option<String>,
     headers: Vec<Header>,
 }
 
@@ -67,6 +68,7 @@ impl Request {
         let path;
         let mut headers = vec![];
         let host;
+        let mut query_string = None;
 
         let request_seperated: Vec<&str> = lines[0].split(" ").collect(); //First line is request
         if request_seperated.len() < 3 {
@@ -81,7 +83,12 @@ impl Request {
         }
 
         //second string is url
-        path = request_seperated[1].to_string();
+        let url = request_seperated[1].to_string();
+        let url_split: Vec<&str> = url.split('?').collect(); //anything after ? is query string
+        path = url_split[0].to_string();
+        if url_split.len() > 1 {
+            query_string = Some(url_split[1].to_string());
+        }
 
         //third is http Verison
         match request_seperated[2] {
@@ -118,6 +125,7 @@ impl Request {
             path,
             headers,
             host,
+            query_string,
         });
     }
 
@@ -167,9 +175,30 @@ mod tests {
                 value: "test".to_string(),
             }],
             host: "test".to_string(),
+            query_string: None,
         };
         let request = Request::from_string("GET / HTTP/1.1\r\nHost: test\r\n\r\n".to_owned())
             .expect("Error Parsing");
+        assert_eq!(expected, request);
+    }
+
+    #[test]
+    fn new_query_string() {
+        let expected = Request {
+            method: Method::GET,
+            version: Version::V1_1,
+            path: "/index.html".to_string(),
+            headers: vec![Header {
+                key: "Host".to_string(),
+                value: "test".to_string(),
+            }],
+            host: "test".to_string(),
+            query_string: Some("test=true".to_string()),
+        };
+        let request = Request::from_string(
+            "GET /index.html?test=true HTTP/1.1\r\nHost: test\r\n\r\n".to_owned(),
+        )
+        .expect("Error Parsing");
         assert_eq!(expected, request);
     }
 
@@ -194,6 +223,7 @@ mod tests {
                 },
             ],
             host: "test".to_string(),
+            query_string: None,
         };
         let request = Request::from_string(
             "GET / HTTP/1.1\r\nHost: test\r\nHeader1: hi\r\nHeader2: Bye\r\n\r\n".to_owned(),
