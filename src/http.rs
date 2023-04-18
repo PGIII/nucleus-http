@@ -33,6 +33,7 @@ pub enum MimeType {
     CSS,
     SVG,
     Icon,
+    Binary,
 }
 
 /// HTTP headers are simple key value pairs both strings
@@ -42,8 +43,8 @@ pub struct Header {
     pub value: String,
 }
 
-impl From<MimeType> for String {
-    fn from(mime: MimeType) -> String {
+impl From<&MimeType> for String {
+    fn from(mime: &MimeType) -> String {
         let media_type = mime.media_type();
         let charset = mime.charset();
         let boundary = mime.boundary();
@@ -57,6 +58,12 @@ impl From<MimeType> for String {
     }
 }
 
+impl From<MimeType> for String {
+    fn from(mime: MimeType) -> String {
+        return String::from(&mime);
+    }
+}
+
 impl From<PathBuf> for MimeType {
     fn from(value: PathBuf) -> Self {
         if let Some(ext) = value.extension() {
@@ -66,6 +73,7 @@ impl From<PathBuf> for MimeType {
         }
     }
 }
+
 impl MimeType {
     pub fn media_type(&self) -> &str {
         match self {
@@ -75,12 +83,13 @@ impl MimeType {
             Self::CSS => "text/css",
             Self::SVG => "image/svg+xml",
             Self::Icon => "image/vnd.microsoft.icon",  
+            Self::Binary => "application/octet-stream",
         }
     }
 
     pub fn charset(&self) -> Option<&str> {
         match self {
-            Self::SVG | Self::Icon => None,
+            Self::SVG | Self::Icon | Self::Binary => None,
             _ => Some("utf-8"),
         }
     }
@@ -98,6 +107,7 @@ impl MimeType {
             "css" => Self::CSS,
             "svg" => Self::SVG,
             "ico" => Self::Icon,
+            "bin" => Self::Binary,
             "html" | _ => Self::PlainText,
         }
     }
@@ -132,6 +142,12 @@ impl TryFrom<&String> for Header {
         } else {
             Err("Invalid Key Value Pair")
         }
+    }
+}
+
+impl From<&Header> for String {
+    fn from(header: &Header) -> String {
+        return format!("{}: {}", header.key, header.value);
     }
 }
 

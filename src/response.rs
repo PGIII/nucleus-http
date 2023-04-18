@@ -1,18 +1,16 @@
-use std::path::PathBuf;
-use tokio::fs;
-
 use crate::http::{Header, MimeType, StatusCode, Version};
 
+pub type ResponseBody = Vec<u8>;
 pub struct Response {
     version: Version,
     status: StatusCode,
-    body: String, //for now only string, but could be other types eg. byte array
+    body: ResponseBody, 
     mime: MimeType,
     headers: Vec<Header>,
 }
 
 impl Response {
-    pub fn new(status: StatusCode, body: String, mime: MimeType) -> Response {
+    pub fn new(status: StatusCode, body: ResponseBody, mime: MimeType) -> Response {
         let version = Version::V1_1;
         Response {
             status,
@@ -23,7 +21,7 @@ impl Response {
         }
     }
 
-    pub fn error(status: StatusCode, body: String) -> Response {
+    pub fn error(status: StatusCode, body: ResponseBody) -> Response {
         let version = Version::V1_1;
         let mime = MimeType::PlainText;
         Response {
@@ -38,13 +36,51 @@ impl Response {
     pub fn set_mime(&mut self, mime: MimeType) {
         self.mime = mime;
     }
+
+    pub fn to_send_buffer(&self) -> Vec<u8> {
+        //transform response to array of bytes to be sent
+        let status: &str = self.status.into();
+        let length = self.body.len();
+        let version: &str = self.version.into();
+        let content_type: String = String::from(&self.mime);
+        let mut headers_string = "".to_string();
+        for header in &self.headers {
+            let header_string: String = String::from(header);
+            headers_string.push_str(&header_string);
+            headers_string.push_str("\r\n");
+        }
+        let mut buffer:Vec<u8> = Vec::new();
+        let response = format!(
+            "{version} {status}\r\n\
+            Content-Length: {length}\r\n\
+            Content-Type: {content_type}\r\n\
+            {headers_string}\r\n"
+        );
+        buffer.append(&mut response.into_bytes());
+        for byte in &self.body {
+            buffer.push(*byte);
+        }
+        return buffer;
+    }
+}
+
+impl From<Vec<u8>> for Response {
+    fn from(bytes: Vec<u8>) -> Self {
+        Response {
+            status: StatusCode::OK,
+            body: bytes,
+            mime: MimeType::PlainText,
+            version: Version::V1_1,
+            headers: Header::new_server(),
+        }
+    }
 }
 
 impl From<String> for Response {
     fn from(string: String) -> Self {
         Response {
             status: StatusCode::OK,
-            body: string,
+            body: string.into(),
             mime: MimeType::PlainText,
             version: Version::V1_1,
             headers: Header::new_server(),
@@ -56,7 +92,7 @@ impl From<&str> for Response {
     fn from(string: &str) -> Self {
         Response {
             status: StatusCode::OK,
-            body: string.to_string(),
+            body: string.into(),
             mime: MimeType::PlainText,
             version: Version::V1_1,
             headers: Header::new_server(),
@@ -69,7 +105,7 @@ impl From<Response> for String {
         let status: &str = response.status.into();
         let length = response.body.len();
         let version: &str = response.version.into();
-        let body: &str = &response.body;
+        let body: &str = &String::from_utf8_lossy(&response.body);
         let content_type: String = response.mime.into();
         let mut headers_string = "".to_string();
         for header in response.headers {

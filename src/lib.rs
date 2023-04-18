@@ -37,8 +37,8 @@ impl Connection {
     }
 
     pub async fn write_response(&mut self, response: Response) -> tokio::io::Result<()> {
-        let response_str: String = response.into();
-        self.write_all(&response_str.into_bytes()).await?;
+        let response_buffer = response.to_send_buffer();
+        self.write_all(&response_buffer).await?;
         Ok(())
     }
 
@@ -122,7 +122,7 @@ impl Server {
                             _ => {
                                 let response = Response::error(
                                     http::StatusCode::ErrBadRequest,
-                                    "400 Bad Request".to_string(),
+                                    "400 Bad Request".into(),
                                 );
                                 connection.write_response(response).await.unwrap();
                             }
@@ -134,7 +134,6 @@ impl Server {
     }
 
     async fn route(request: &Request, connection: &Connection) -> Response {
-        dbg!(request);
         let routes = connection.routes();
         let routes_locked = routes.read().await;
 
@@ -162,17 +161,16 @@ impl Server {
                 } else {
                     return Response::error(
                         http::StatusCode::ErrNotFound,
-                        "File Not Found".to_string(),
+                        "File Not Found".into(),
                     );
                 }
             }
             let final_path = host_dir.join(file_path);
-            dbg!(&final_path);
             return Self::get_file(final_path).await;
         }
 
         //no route try static serve
-        let response = Response::error(http::StatusCode::ErrNotFound, "File Not Found".to_string());
+        let response = Response::error(http::StatusCode::ErrNotFound, "File Not Found".into());
         return response;
     }
 
@@ -186,25 +184,24 @@ impl Server {
     }
 
     async fn get_file(path: PathBuf) -> Response {
-        match fs::read_to_string(&path).await {
+        match fs::read(&path).await {
             Ok(contents) => {
                 let mime: MimeType = path.into();
-                let mut response = Response::from(contents);
-                response.set_mime(mime);
+                let response = Response::new(http::StatusCode::OK, contents, mime);
                 return response;
             }
             Err(err) => match err.kind() {
                 std::io::ErrorKind::PermissionDenied => {
                     let response = Response::error(
                         http::StatusCode::ErrForbidden,
-                        "Permission Denied".to_string(),
+                        "Permission Denied".into()
                     );
                     return response;
                 }
                 std::io::ErrorKind::NotFound | _ => {
                     let response = Response::error(
                         http::StatusCode::ErrNotFound,
-                        "File Not Found".to_string(),
+                        "Static File Not Found".into(),
                     );
                     return response;
                 }
