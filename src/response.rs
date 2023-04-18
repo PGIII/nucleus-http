@@ -1,3 +1,6 @@
+use std::path::PathBuf;
+use tokio::fs;
+
 use crate::http::{Header, MimeType, StatusCode, Version};
 
 pub struct Response {
@@ -30,6 +33,10 @@ impl Response {
             mime,
             headers: Header::new_server(),
         }
+    }
+
+    pub fn set_mime(&mut self, mime: MimeType) {
+        self.mime = mime;
     }
 }
 

@@ -1,3 +1,4 @@
+use http::MimeType;
 use request::Request;
 use response::Response;
 use routes::Routes;
@@ -133,6 +134,7 @@ impl Server {
     }
 
     async fn route(request: &Request, connection: &Connection) -> Response {
+        dbg!(request);
         let routes = connection.routes();
         let routes_locked = routes.read().await;
 
@@ -153,10 +155,20 @@ impl Server {
             }
         }
         if let Some(host_dir) = Self::get_vhost_dir(request, connection).await {
-            if let Some(file_name) = PathBuf::from(request.path()).file_name() {
-                let path = host_dir.join(file_name);
-                return Self::get_file(path).await;
+            let mut file_path = PathBuf::from(request.path());
+            if file_path.is_absolute() {
+                if let Ok(path) = file_path.strip_prefix("/") {
+                    file_path = path.to_path_buf();
+                } else {
+                    return Response::error(
+                        http::StatusCode::ErrNotFound,
+                        "File Not Found".to_string(),
+                    );
+                }
             }
+            let final_path = host_dir.join(file_path);
+            dbg!(&final_path);
+            return Self::get_file(final_path).await;
         }
 
         //no route try static serve
@@ -174,9 +186,12 @@ impl Server {
     }
 
     async fn get_file(path: PathBuf) -> Response {
-        match fs::read_to_string(path).await {
+        match fs::read_to_string(&path).await {
             Ok(contents) => {
-                return Response::from(contents);
+                let mime: MimeType = path.into();
+                let mut response = Response::from(contents);
+                response.set_mime(mime);
+                return response;
             }
             Err(err) => match err.kind() {
                 std::io::ErrorKind::PermissionDenied => {

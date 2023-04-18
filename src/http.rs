@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum Method {
     GET,
@@ -25,7 +27,12 @@ pub enum StatusCode {
 }
 
 pub enum MimeType {
-    PlainText
+    PlainText,
+    JavaScript,
+    Json,
+    CSS,
+    SVG,
+    Icon,
 }
 
 /// HTTP headers are simple key value pairs both strings
@@ -36,32 +43,62 @@ pub struct Header {
 }
 
 impl From<MimeType> for String {
-    fn from(mime:MimeType) -> String {
+    fn from(mime: MimeType) -> String {
         let media_type = mime.media_type();
         let charset = mime.charset();
         let boundary = mime.boundary();
-        if let Some(boundary) = boundary {
+        if let (Some(boundary), Some(charset)) = (boundary, charset) {
             format!("{}; charset={}; boundary={}", media_type, charset, boundary)
-        } else {
+        } else if let (None, Some(charset)) = (boundary, charset) {
             format!("{}; charset={}", media_type, charset)
+        } else {
+            format!("{};", media_type)
         }
     }
 }
 
+impl From<PathBuf> for MimeType {
+    fn from(value: PathBuf) -> Self {
+        if let Some(ext) = value.extension() {
+            return MimeType::from_extension(&ext.to_string_lossy());
+        } else {
+            return MimeType::PlainText;
+        }
+    }
+}
 impl MimeType {
     pub fn media_type(&self) -> &str {
         match self {
-            Self::PlainText => "text/html"
+            Self::PlainText => "text/html",
+            Self::JavaScript => "text/javascript",
+            Self::Json => "application/json",
+            Self::CSS => "text/css",
+            Self::SVG => "image/svg+xml",
+            Self::Icon => "image/vnd.microsoft.icon",  
         }
     }
-    pub fn charset(&self) -> &str {
+
+    pub fn charset(&self) -> Option<&str> {
         match self {
-            Self::PlainText => "utf-8"
+            Self::SVG | Self::Icon => None,
+            _ => Some("utf-8"),
         }
     }
+
     pub fn boundary(&self) -> Option<&str> {
         match self {
-            Self::PlainText => None
+            _ => None,
+        }
+    }
+
+    pub fn from_extension(extension: &str) -> Self {
+        match extension {
+            "json" => Self::Json,
+            "js" => Self::JavaScript,
+            "css" => Self::CSS,
+            "svg" => Self::SVG,
+            "ico" => Self::Icon,
+            "html" | _ => Self::PlainText,
         }
     }
 }
@@ -100,22 +137,25 @@ impl TryFrom<&String> for Header {
 
 impl From<Header> for String {
     fn from(header: Header) -> String {
-        return format!("{}: {}", header.key, header.value); 
+        return format!("{}: {}", header.key, header.value);
     }
 }
 
 impl Header {
-
     pub fn new(key: &str, value: &str) -> Header {
-        Header { key: key.to_string(), value: value.to_string() }
+        Header {
+            key: key.to_string(),
+            value: value.to_string(),
+        }
     }
     /// Create new vector of headers for server
     pub fn new_server() -> Vec<Header> {
         const VERSION: &str = env!("CARGO_PKG_VERSION");
         const NAME: &str = env!("CARGO_PKG_NAME");
-        return vec![
-            Header {key: "Server".to_string(), value: format!("{NAME} {VERSION}").to_string()}
-        ];
+        return vec![Header {
+            key: "Server".to_string(),
+            value: format!("{NAME} {VERSION}").to_string(),
+        }];
     }
 }
 
