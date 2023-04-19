@@ -19,15 +19,19 @@ async fn main() -> tokio::io::Result<()> {
     let mut server = Server::bind(listener_ip).await?;
     server.add_virtual_host(localhost_vhost).await;
     server
-        .add_route(Route::get("/locals", Box::new(base_get)))
+        .add_route(Route::get_async("/async", Box::new(async_get)))
         .await;
+    server.add_route(Route::get("/sync", get)).await;
     server.add_route(Route::get_static("/", "index.html")).await;
 
     server.serve().await.unwrap();
     return Ok(());
 }
 
-fn base_get(_req: &Request) -> BoxedFuture<String> {
+fn async_get(_req: &Request) -> BoxedFuture<String> {
     Box::pin(async move { "Hello From Rust Routes!".to_string() })
 }
 
+fn get(_req: &Request) -> String {
+    "Hello From Sync Func".to_string()
+}

@@ -1,7 +1,7 @@
 use http::MimeType;
 use request::Request;
 use response::Response;
-use routes::Routes;
+use routes::{Routes, ResolveFunction};
 use std::{path::PathBuf, sync::Arc};
 use tokio::{
     self, fs,
@@ -133,6 +133,15 @@ impl Server {
         }
     }
 
+    async fn run_sync_func(request: Request, func: ResolveFunction) -> Response {
+        let blocking = tokio::task::spawn_blocking(move || {
+            let result = func(&request);
+            return result;
+        }).await;
+        //FIXME: return error response intead of unwap
+        return Response::from(blocking.unwrap());
+    }
+
     async fn route(request: &Request, connection: &Connection) -> Response {
         let routes = connection.routes();
         let routes_locked = routes.read().await;
@@ -140,9 +149,12 @@ impl Server {
         for route in &*routes_locked {
             if Self::routes_request_match(request, &route) {
                 match route.resolver() {
-                    routes::RouteResolver::Function(func) => {
+                    routes::RouteResolver::AsyncFunction(func) => {
                         let func_return = func(&request).await;
                         return Response::from(func_return);
+                    }
+                    routes::RouteResolver::Function(func) => {
+                        return Self::run_sync_func(request.to_owned(), func.to_owned()).await;
                     }
                     routes::RouteResolver::Static { file_path } => {
                         if let Some(host_dir) = Self::get_vhost_dir(request, connection).await {
@@ -159,10 +171,7 @@ impl Server {
                 if let Ok(path) = file_path.strip_prefix("/") {
                     file_path = path.to_path_buf();
                 } else {
-                    return Response::error(
-                        http::StatusCode::ErrNotFound,
-                        "File Not Found".into(),
-                    );
+                    return Response::error(http::StatusCode::ErrNotFound, "File Not Found".into());
                 }
             }
             let final_path = host_dir.join(file_path);
@@ -192,10 +201,8 @@ impl Server {
             }
             Err(err) => match err.kind() {
                 std::io::ErrorKind::PermissionDenied => {
-                    let response = Response::error(
-                        http::StatusCode::ErrForbidden,
-                        "Permission Denied".into()
-                    );
+                    let response =
+                        Response::error(http::StatusCode::ErrForbidden, "Permission Denied".into());
                     return response;
                 }
                 std::io::ErrorKind::NotFound | _ => {

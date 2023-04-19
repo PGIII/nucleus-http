@@ -1,6 +1,6 @@
 use crate::http::{Header, Method, Version};
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct Request {
     method: Method,
     path: String,

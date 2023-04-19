@@ -1,16 +1,14 @@
-use crate::{
-    http::Method,
-    request::self,
-};
+use crate::{http::Method, request};
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::sync::RwLock;
 
-//type ResolveFunction = fn(&request::Request) -> String;
+pub type ResolveFunction = fn(&request::Request) -> String;
 pub type BoxedFuture<T = ()> = Pin<Box<dyn Future<Output = T> + Send>>;
-pub type ResolveFunction = Box<dyn Fn(&request::Request) -> BoxedFuture<String> + Send + Sync>;
+pub type ResolveAsyncFunction = Box<dyn Fn(&request::Request) -> BoxedFuture<String> + Send + Sync>;
 
 pub enum RouteResolver {
     Static { file_path: String },
+    AsyncFunction(ResolveAsyncFunction),
     Function(ResolveFunction),
 }
 
@@ -30,6 +28,16 @@ impl Route {
     pub fn get(path: &str, resolve_func: ResolveFunction) -> Route {
         let method = Method::GET;
         let resolver = RouteResolver::Function(resolve_func);
+        Route {
+            path: path.to_string(),
+            resolver,
+            method,
+        }
+    }
+
+    pub fn get_async(path: &str, resolve_func: ResolveAsyncFunction) -> Route {
+        let method = Method::GET;
+        let resolver = RouteResolver::AsyncFunction(resolve_func);
         Route {
             path: path.to_string(),
             resolver,

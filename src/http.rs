@@ -37,7 +37,7 @@ pub enum MimeType {
 }
 
 /// HTTP headers are simple key value pairs both strings
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Header {
     pub key: String,
     pub value: String,
