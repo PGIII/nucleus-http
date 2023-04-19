@@ -26,6 +26,7 @@ pub enum StatusCode {
     ErrInternalServer = 500,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum MimeType {
     HTML,
     PlainText,
