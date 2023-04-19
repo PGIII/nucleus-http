@@ -27,6 +27,7 @@ pub enum StatusCode {
 }
 
 pub enum MimeType {
+    HTML,
     PlainText,
     JavaScript,
     Json,
@@ -77,12 +78,13 @@ impl From<PathBuf> for MimeType {
 impl MimeType {
     pub fn media_type(&self) -> &str {
         match self {
-            Self::PlainText => "text/html",
+            Self::PlainText => "text/plain",
+            Self::HTML => "text/html",
             Self::JavaScript => "text/javascript",
             Self::Json => "application/json",
             Self::CSS => "text/css",
             Self::SVG => "image/svg+xml",
-            Self::Icon => "image/vnd.microsoft.icon",  
+            Self::Icon => "image/vnd.microsoft.icon",
             Self::Binary => "application/octet-stream",
         }
     }
@@ -108,7 +110,8 @@ impl MimeType {
             "svg" => Self::SVG,
             "ico" => Self::Icon,
             "bin" => Self::Binary,
-            "html" | _ => Self::PlainText,
+            "html" => Self::HTML,
+            _ => Self::PlainText,
         }
     }
 }
