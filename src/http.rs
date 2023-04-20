@@ -36,6 +36,7 @@ pub enum MimeType {
     SVG,
     Icon,
     Binary,
+    JPEG,
 }
 
 /// HTTP headers are simple key value pairs both strings
@@ -87,12 +88,13 @@ impl MimeType {
             Self::SVG => "image/svg+xml",
             Self::Icon => "image/vnd.microsoft.icon",
             Self::Binary => "application/octet-stream",
+            Self::JPEG => "image/jpeg",
         }
     }
 
     pub fn charset(&self) -> Option<&str> {
         match self {
-            Self::SVG | Self::Icon | Self::Binary => None,
+            Self::SVG | Self::Icon | Self::Binary | Self::JPEG => None,
             _ => Some("utf-8"),
         }
     }
@@ -112,6 +114,7 @@ impl MimeType {
             "ico" => Self::Icon,
             "bin" => Self::Binary,
             "html" => Self::HTML,
+            "jpeg" | "jpg" => Self::JPEG,
             _ => Self::PlainText,
         }
     }
