@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{fmt::Display, path::PathBuf, collections::HashMap};
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum Method {
@@ -26,18 +26,14 @@ pub enum StatusCode {
     ErrInternalServer = 500,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum MimeType {
-    HTML,
-    PlainText,
-    JavaScript,
-    Json,
-    CSS,
-    SVG,
-    Icon,
-    Binary,
-    JPEG,
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct MimeType {
+    media_type: &'static str,
+    charset: Option<&'static str>,
+    boundary: Option<&'static str>,
 }
+/// Keyed by extension eg html
+pub type MimeMap = HashMap<String, MimeType>;
 
 /// HTTP headers are simple key value pairs both strings
 #[derive(Debug, PartialEq, Clone)]
@@ -46,18 +42,28 @@ pub struct Header {
     pub value: String,
 }
 
+impl Display for MimeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let media_type = self.media_type();
+        let charset = self.charset();
+        let boundary = self.boundary();
+        if let (Some(boundary), Some(charset)) = (boundary, charset) {
+            write!(
+                f,
+                "{}; charset={}; boundary={}",
+                media_type, charset, boundary
+            )
+        } else if let (None, Some(charset)) = (boundary, charset) {
+            write!(f, "{}; charset={}", media_type, charset)
+        } else {
+            write!(f, "{};", media_type)
+        }
+    }
+}
+
 impl From<&MimeType> for String {
     fn from(mime: &MimeType) -> String {
-        let media_type = mime.media_type();
-        let charset = mime.charset();
-        let boundary = mime.boundary();
-        if let (Some(boundary), Some(charset)) = (boundary, charset) {
-            format!("{}; charset={}; boundary={}", media_type, charset, boundary)
-        } else if let (None, Some(charset)) = (boundary, charset) {
-            format!("{}; charset={}", media_type, charset)
-        } else {
-            format!("{};", media_type)
-        }
+        format!("{}", mime)
     }
 }
 
@@ -67,56 +73,39 @@ impl From<MimeType> for String {
     }
 }
 
-impl From<PathBuf> for MimeType {
-    fn from(value: PathBuf) -> Self {
-        if let Some(ext) = value.extension() {
-            return MimeType::from_extension(&ext.to_string_lossy());
-        } else {
-            return MimeType::PlainText;
-        }
-    }
-}
+// impl From<PathBuf> for MimeType {
+//     fn from(value: PathBuf) -> Self {
+//         if let Some(ext) = value.extension() {
+//             return MimeType::from_extension(&ext.to_string_lossy());
+//         } else {
+//             return MimeType::PlainText;
+//         }
+//     }
+// }
 
 impl MimeType {
-    pub fn media_type(&self) -> &str {
-        match self {
-            Self::PlainText => "text/plain",
-            Self::HTML => "text/html",
-            Self::JavaScript => "text/javascript",
-            Self::Json => "application/json",
-            Self::CSS => "text/css",
-            Self::SVG => "image/svg+xml",
-            Self::Icon => "image/vnd.microsoft.icon",
-            Self::Binary => "application/octet-stream",
-            Self::JPEG => "image/jpeg",
+    pub fn new(
+        media_type: &'static str,
+        charset: Option<&'static str>,
+        boundary: Option<&'static str>,
+    ) -> Self {
+        Self {
+            media_type,
+            charset,
+            boundary,
         }
+    }
+
+    pub fn media_type(&self) -> &str {
+        return self.media_type;
     }
 
     pub fn charset(&self) -> Option<&str> {
-        match self {
-            Self::SVG | Self::Icon | Self::Binary | Self::JPEG => None,
-            _ => Some("utf-8"),
-        }
+        return self.charset;
     }
 
     pub fn boundary(&self) -> Option<&str> {
-        match self {
-            _ => None,
-        }
-    }
-
-    pub fn from_extension(extension: &str) -> Self {
-        match extension {
-            "json" => Self::Json,
-            "js" => Self::JavaScript,
-            "css" => Self::CSS,
-            "svg" => Self::SVG,
-            "ico" => Self::Icon,
-            "bin" => Self::Binary,
-            "html" => Self::HTML,
-            "jpeg" | "jpg" => Self::JPEG,
-            _ => Self::PlainText,
-        }
+        return self.boundary;
     }
 }
 

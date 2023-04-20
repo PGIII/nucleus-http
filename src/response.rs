@@ -1,12 +1,23 @@
 use crate::http::{Header, MimeType, StatusCode, Version};
 
 pub type ResponseBody = Vec<u8>;
+#[derive(Debug, Clone)]
 pub struct Response {
     version: Version,
     status: StatusCode,
     body: ResponseBody, 
     mime: MimeType,
     headers: Vec<Header>,
+}
+
+pub trait IntoResponse {
+    fn into_response(&self) -> Response;
+}
+
+impl IntoResponse for Response {
+    fn into_response(&self) -> Response {
+        self.clone() 
+    }
 }
 
 impl Response {

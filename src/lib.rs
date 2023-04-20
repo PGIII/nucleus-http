@@ -1,7 +1,7 @@
-use http::MimeType;
+use http::{MimeMap, MimeType};
 use request::Request;
 use response::Response;
-use routes::{Routes, ResolveFunction};
+use routes::{ResolveFunction, Routes};
 use std::{path::PathBuf, sync::Arc};
 use tokio::{
     self, fs,
@@ -22,6 +22,7 @@ pub struct Server {
     listener: TcpListener,
     routes: Routes,
     virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
+    mime_types: MimeMap,
 }
 
 pub struct Connection {
@@ -52,6 +53,34 @@ impl Connection {
 }
 
 impl Server {
+    fn default_mime_types() -> MimeMap {
+        let mut mime_types = MimeMap::new();
+        mime_types.insert(
+            "html".to_string(),
+            MimeType::new("text/html", Some("utf-8"), None),
+        );
+        return mime_types;
+    }
+
+    pub fn add_mime_type(
+        &mut self,
+        extension: &str,
+        media_type: &str,
+        charset: Option<&str>,
+        boundary: Option<&str>,
+    ) -> Result<(), &str> {
+        match self.mime_types.get(extension) {
+            Some(_) => Err("Extension already in hashmap"),
+            None => {
+                self.mime_types.insert(
+                    extension.to_string(),
+                    MimeType::new(media_type, charset, boundary),
+                );
+                Ok(())
+            }
+        }
+    }
+
     pub async fn add_route(&mut self, route: routes::Route) {
         let mut routes_locked = self.routes.write().await;
         routes_locked.push(route);
@@ -59,10 +88,12 @@ impl Server {
 
     pub async fn bind(ip: &str) -> Result<Server, tokio::io::Error> {
         let listener = tokio::net::TcpListener::bind(ip).await?;
+        let mime_types = Self::default_mime_types();
         Ok(Server {
             listener,
             routes: Arc::new(RwLock::new(vec![])),
             virtual_hosts: Arc::new(RwLock::new(vec![])),
+            mime_types,
         })
     }
 
@@ -137,7 +168,8 @@ impl Server {
         let blocking = tokio::task::spawn_blocking(move || {
             let result = func(&request);
             return result;
-        }).await;
+        })
+        .await;
         //FIXME: return error response intead of unwap
         return Response::from(blocking.unwrap());
     }
