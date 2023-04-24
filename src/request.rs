@@ -144,6 +144,10 @@ impl Request {
         let lines_string: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
         return Request::from_lines(&lines_string);
     }
+
+    pub fn query_string(&self) -> Option<&String> {
+        self.query_string.as_ref()
+    }
 }
 
 #[cfg(test)]
