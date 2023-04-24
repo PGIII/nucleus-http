@@ -9,6 +9,7 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::RwLock,
 };
+use log;
 
 pub mod http;
 pub mod methods;
@@ -117,7 +118,6 @@ impl Server {
                         connection.write_response(response).await.unwrap();
                     }
                     Err(e) => {
-                        dbg!(e);
                         match e {
                             _ => {
                                 let response = Response::error(
@@ -143,6 +143,7 @@ impl Server {
     }
 
     async fn route(request: &Request, connection: &Connection) -> Response {
+        log::info!("{} Request for: {}", request.method(), request.path());
         let routes = connection.routes();
         let routes_locked = routes.read().await;
 

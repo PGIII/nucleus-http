@@ -5,11 +5,14 @@ use nucleus_http::{
     Server,
 };
 use tokio;
+use pretty_env_logger;
+use log;
 
 #[tokio::main]
 async fn main() -> tokio::io::Result<()> {
+    pretty_env_logger::init();
     let listener_ip = "0.0.0.0:7878";
-    println!("Listening on {listener_ip}");
+    log::info!("Listening on {listener_ip}");
     let localhost_vhost = VirtualHost::new(
         "localhost",
         "0.0.0.0:7878",

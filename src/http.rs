@@ -1,3 +1,4 @@
+use core::fmt;
 use std::path::PathBuf;
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -46,6 +47,14 @@ pub struct Header {
     pub value: String,
 }
 
+impl fmt::Display for Method {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::GET => write!(f, "GET"),
+            Self::POST => write!(f, "POST"),
+        }
+    }
+}
 impl From<&MimeType> for String {
     fn from(mime: &MimeType) -> String {
         let media_type = mime.media_type();
