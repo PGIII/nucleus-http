@@ -69,7 +69,7 @@ impl From<Vec<u8>> for Response {
         Response {
             status: StatusCode::OK,
             body: bytes,
-            mime: MimeType::PlainText,
+            mime: MimeType::Binary,
             version: Version::V1_1,
             headers: Header::new_server(),
         }
@@ -81,7 +81,7 @@ impl From<String> for Response {
         Response {
             status: StatusCode::OK,
             body: string.into(),
-            mime: MimeType::PlainText,
+            mime: MimeType::HTML,
             version: Version::V1_1,
             headers: Header::new_server(),
         }
@@ -93,7 +93,7 @@ impl From<&str> for Response {
         Response {
             status: StatusCode::OK,
             body: string.into(),
-            mime: MimeType::PlainText,
+            mime: MimeType::HTML,
             version: Version::V1_1,
             headers: Header::new_server(),
         }
