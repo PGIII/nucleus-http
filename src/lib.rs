@@ -1,15 +1,24 @@
+use async_trait::async_trait;
 use http::MimeType;
 use log;
 use request::Request;
 use response::Response;
 use routes::{ResolveFunction, Routes};
-use std::{fmt::format, path::PathBuf, sync::Arc};
+use std::{
+    fmt::format,
+    path::{Path, PathBuf},
+    sync::Arc, io::Read,
+};
 use tokio::{
     self, fs,
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
+    io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    net::{unix::SocketAddr, TcpListener, TcpStream},
     sync::Mutex,
     sync::RwLock,
+};
+use tokio_rustls::{
+    rustls::{self, Certificate, PrivateKey},
+    TlsAcceptor, TlsStream,
 };
 
 pub mod http;
@@ -22,34 +31,86 @@ pub mod virtual_host;
 
 pub struct Server {
     listener: TcpListener,
+    acceptor: Option<TlsAcceptor>,
     routes: Routes,
     virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
+}
+
+trait Stream: AsyncWrite + AsyncRead + Unpin {
+
+}
+
+// Auto Implement Stream for all types that implent asyncRead + asyncWrite
+impl<T> Stream for T 
+where 
+    T: AsyncRead + AsyncWrite + Unpin{
+
 }
 
 pub struct Connection {
-    stream: TcpStream,
+    //stream: TcpStream,
+    stream: Box<dyn Stream>,
+    client_ip: std::net::SocketAddr,
     routes: Routes,
     virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
 }
 
-impl Connection {
-    pub async fn write_all(&mut self, src: &[u8]) -> tokio::io::Result<()> {
+pub struct TLSConnection<IO> {
+    stream: TlsStream<IO>,
+    client_ip: std::net::SocketAddr,
+    routes: Routes,
+    virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
+}
+
+#[async_trait]
+trait ServerConnection {
+    fn routes(&self) -> Routes;
+    fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>>;
+    async fn write_all(&mut self, src: &[u8]) -> tokio::io::Result<()>;
+    async fn write_response(&mut self, response: Response) -> tokio::io::Result<()>;
+}
+
+#[async_trait]
+impl ServerConnection for TLSConnection<TcpStream> {
+    fn routes(&self) -> Routes {
+        return self.routes.clone();
+    }
+
+    fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>> {
+        return self.virtual_hosts.clone();
+    }
+
+    async fn write_all(&mut self, src: &[u8]) -> tokio::io::Result<()> {
         self.stream.write_all(src).await?;
         Ok(())
     }
 
-    pub async fn write_response(&mut self, response: Response) -> tokio::io::Result<()> {
+    async fn write_response(&mut self, response: Response) -> tokio::io::Result<()> {
         let response_buffer = response.to_send_buffer();
         self.write_all(&response_buffer).await?;
         Ok(())
     }
+}
 
-    pub fn routes(&self) -> Routes {
+#[async_trait]
+impl ServerConnection for Connection {
+    fn routes(&self) -> Routes {
         return self.routes.clone();
     }
 
-    pub fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>> {
+    fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>> {
         return self.virtual_hosts.clone();
+    }
+
+    async fn write_all(&mut self, src: &[u8]) -> tokio::io::Result<()> {
+        self.stream.write_all(src).await?;
+        Ok(())
+    }
+
+    async fn write_response(&mut self, response: Response) -> tokio::io::Result<()> {
+        let response_buffer = response.to_send_buffer();
+        self.write_all(&response_buffer).await?;
+        Ok(())
     }
 }
 
@@ -65,6 +126,25 @@ impl Server {
             listener,
             routes: Arc::new(RwLock::new(vec![])),
             virtual_hosts: Arc::new(RwLock::new(vec![])),
+            acceptor: None,
+        })
+    }
+
+    pub async fn bind_tls(ip: &str, cert: &Path, key: &Path) -> Result<Server, tokio::io::Error> {
+        let files = vec![cert, key];
+        let (mut keys, certs) = load_keys_and_certs(&files)?;
+        let config = rustls::ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_single_cert(certs, keys.remove(0))
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
+        let acceptor = TlsAcceptor::from(Arc::new(config));
+        let listener = tokio::net::TcpListener::bind(ip).await?;
+        Ok(Server {
+            listener,
+            routes: Arc::new(RwLock::new(vec![])),
+            virtual_hosts: Arc::new(RwLock::new(vec![])),
+            acceptor: Some(acceptor),
         })
     }
 
@@ -82,112 +162,99 @@ impl Server {
     }
 
     pub async fn accept(&self) -> tokio::io::Result<Connection> {
-        let (stream, _) = self.listener.accept().await?;
+        let (stream, client_ip) = self.listener.accept().await?;
+
         Ok(Connection {
-            stream,
+            client_ip,
+            stream: Box::new(stream),
             routes: self.routes(),
             virtual_hosts: self.virtual_hosts(),
         })
     }
 
-    pub async fn serve(&self) -> tokio::io::Result<()> {
-        loop {
-            let mut connection = self.accept().await?;
-
-            tokio::spawn(async move {
-                let mut request_str = String::new();
-                loop {
-                    let mut buffer = vec![0; 1024]; //Vector to avoid buffer on stack
-                    match connection.stream.read(&mut buffer).await {
-                        Ok(0) => {
-                            log::debug!("Connection Terminated by client");
-                            break;
-                        }
-                        Ok(n) => {
-                            //got some bytes append them and see if we need to do any proccessing
-                            for i in 0..n {
-                                request_str.push(buffer[i] as char);
-                                let request_result =
-                                    request::Request::from_string(request_str.clone());
-                                match request_result {
-                                    Ok(r) => {
-                                        let response = Self::route(&r, &connection).await;
-                                        connection.write_response(response).await.unwrap();
-                                        request_str.clear();
-                                    }
-                                    Err(e) => match e {
-                                        request::Error::InvalidString
-                                        | request::Error::MissingBlankLine => {
-                                            //Parital response keep reading
-                                        }
-                                        _ => {
-                                            let error_res = format!("400 bad request: {}", e);
-                                            let response = Response::error(
-                                                http::StatusCode::ErrBadRequest,
-                                                error_res.into(),
-                                            );
-                                            if let Err(err) =
-                                                connection.write_response(response).await
-                                            {
-                                                log::error!(
-                                                    "Error Writing Data: {}",
-                                                    err.to_string()
-                                                );
-                                            }
-                                        }
-                                    },
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            log::error!("Socket read error: {}", err.to_string());
-                            break;
-                        }
-                    }
+    pub async fn accept_tls(&self) -> tokio::io::Result<TLSConnection<TcpStream>> {
+        let (stream, client_ip) = self.listener.accept().await?;
+        if let Some(acceptor) = &self.acceptor {
+            let acceptor = acceptor.clone();
+            match acceptor.accept(stream).await {
+                Ok(s) => Ok(TLSConnection {
+                    client_ip,
+                    stream: tokio_rustls::TlsStream::Server(s),
+                    routes: self.routes(),
+                    virtual_hosts: self.virtual_hosts(),
+                }),
+                Err(_) => {
+                    return Err(tokio::io::Error::new(
+                        tokio::io::ErrorKind::Other,
+                        "Error Accepting TLS Stream",
+                    ));
                 }
-            });
+            }
+        } else {
+            return Err(tokio::io::Error::new(
+                tokio::io::ErrorKind::Other,
+                "Error No TLS Acceptor",
+            ));
         }
     }
-    pub async fn old_serve(&self) -> tokio::io::Result<()> {
-        loop {
-            let mut connection = self.accept().await?;
 
-            tokio::spawn(async move {
-                let mut buf_reader = tokio::io::BufReader::new(&mut connection.stream);
-                let mut request_str = "".to_owned();
-
-                loop {
-                    let mut line: String = "".to_string();
-                    let result = buf_reader.read_line(&mut line).await;
-                    match result {
-                        Ok(_) => {
-                            request_str += &line;
-                            if &line == "\r\n" {
-                                break;
+    pub async fn handle_serve(connection: &(impl ServerConnection)) {
+        tokio::spawn(async move {
+            let mut request_str = String::new();
+            loop {
+                let mut buffer = vec![0; 1024]; //Vector to avoid buffer on stack
+                match connection.read(&mut buffer).await {
+                    Ok(0) => {
+                        log::debug!("Connection Terminated by client");
+                        break;
+                    }
+                    Ok(n) => {
+                        //got some bytes append them and see if we need to do any proccessing
+                        for i in 0..n {
+                            request_str.push(buffer[i] as char);
+                            let request_result = request::Request::from_string(request_str.clone());
+                            match request_result {
+                                Ok(r) => {
+                                    let response = Self::route(&r, connection).await;
+                                    connection.write_response(response).await.unwrap();
+                                    request_str.clear();
+                                }
+                                Err(e) => match e {
+                                    request::Error::InvalidString
+                                    | request::Error::MissingBlankLine => {
+                                        //Parital response keep reading
+                                    }
+                                    _ => {
+                                        let error_res = format!("400 bad request: {}", e);
+                                        let response = Response::error(
+                                            http::StatusCode::ErrBadRequest,
+                                            error_res.into(),
+                                        );
+                                        if let Err(err) = connection.write_response(response).await
+                                        {
+                                            log::error!("Error Writing Data: {}", err.to_string());
+                                        }
+                                    }
+                                },
                             }
                         }
-                        Err(_) => {
-                            break;
-                        }
+                    }
+                    Err(err) => {
+                        log::error!("Socket read error: {}", err.to_string());
+                        break;
                     }
                 }
-                let request_result = request::Request::from_string(request_str);
-                match request_result {
-                    Ok(r) => {
-                        let response = Self::route(&r, &connection).await;
-                        connection.write_response(response).await.unwrap();
-                    }
-                    Err(e) => match e {
-                        _ => {
-                            let response = Response::error(
-                                http::StatusCode::ErrBadRequest,
-                                "400 Bad Request".into(),
-                            );
-                            connection.write_response(response).await.unwrap();
-                        }
-                    },
-                }
-            });
+            }
+        });
+    }
+
+    pub async fn serve(&self) -> tokio::io::Result<()> {
+        loop {
+            if self.acceptor.is_some() {
+                let connection = self.accept_tls().await?;
+            } else {
+                let connection = self.accept().await?;
+            }
         }
     }
 
@@ -201,7 +268,7 @@ impl Server {
         return Response::from(blocking.unwrap());
     }
 
-    async fn route(request: &Request, connection: &Connection) -> Response {
+    async fn route(request: &Request, connection: &(impl ServerConnection)) -> Response {
         log::info!("{} Request for: {}", request.method(), request.path());
         let routes = connection.routes();
         let routes_locked = routes.read().await;
@@ -243,7 +310,10 @@ impl Server {
         return response;
     }
 
-    async fn get_vhost_dir(request: &Request, connection: &Connection) -> Option<PathBuf> {
+    async fn get_vhost_dir(
+        request: &Request,
+        connection: &(impl ServerConnection),
+    ) -> Option<PathBuf> {
         for vhost in &*connection.virtual_hosts().read().await {
             if vhost.hostname() == request.hostname() {
                 return Some(vhost.root_dir().to_path_buf());
@@ -281,4 +351,31 @@ impl Server {
         let methods_match = request.method() == route.method();
         return methods_match && path_match;
     }
+}
+
+fn load_keys_and_certs(paths: &Vec<&Path>) -> std::io::Result<(Vec<PrivateKey>, Vec<Certificate>)> {
+    let mut keys = vec![];
+    let mut certs = vec![];
+    for path in paths {
+        let items =
+            rustls_pemfile::read_all(&mut std::io::BufReader::new(std::fs::File::open(path)?))?;
+        for item in items {
+            match item {
+                rustls_pemfile::Item::RSAKey(key) => {
+                    keys.push(PrivateKey(key));
+                }
+                rustls_pemfile::Item::ECKey(key) => {
+                    keys.push(PrivateKey(key));
+                }
+                rustls_pemfile::Item::PKCS8Key(key) => {
+                    keys.push(PrivateKey(key));
+                }
+                rustls_pemfile::Item::X509Certificate(cert) => {
+                    certs.push(Certificate(cert));
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok((keys, certs))
 }
