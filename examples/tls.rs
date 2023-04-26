@@ -43,25 +43,6 @@ struct Options {
 #[tokio::main]
 async fn main() -> tokio::io::Result<()> {
     pretty_env_logger::init();
-    /*
-        let listener_ip = "0.0.0.0:7878";
-        log::info!("Listening on {listener_ip}");
-        let localhost_vhost = VirtualHost::new(
-            "localhost",
-            "0.0.0.0:7878",
-            "/Users/prestongarrisoniii/dev/source/nucleus-http/",
-        );
-
-        let mut server = Server::bind(listener_ip).await?;
-        server.add_virtual_host(localhost_vhost).await;
-        server
-            .add_route(Route::get_async("/async", Box::new(async_get)))
-            .await;
-        server.add_route(Route::get("/sync", get)).await;
-        server.add_route(Route::get_static("/", "index.html")).await;
-
-        server.serve().await.unwrap();
-    */
     let options: Options = argh::from_env();
 
     let addr = options
@@ -69,56 +50,24 @@ async fn main() -> tokio::io::Result<()> {
         .to_socket_addrs()?
         .next()
         .ok_or_else(|| io::Error::from(io::ErrorKind::AddrNotAvailable))?;
-    let files: Vec<&Path> = vec![&options.cert, &options.key];
-    let (mut keys, certs) = load_keys_and_certs(&files)?;
-    let flag_echo = options.echo_mode;
+    let listener_ip = "0.0.0.0:8443";
+    log::info!("Listening on {listener_ip}");
+    let localhost_vhost = VirtualHost::new(
+        "localhost",
+        listener_ip,
+        "/Users/prestongarrisoniii/dev/source/nucleus-http/",
+    );
 
-    let config = rustls::ServerConfig::builder()
-        .with_safe_defaults()
-        .with_no_client_auth()
-        .with_single_cert(certs, keys.remove(0))
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
-    let acceptor = TlsAcceptor::from(Arc::new(config));
+    let mut server = Server::bind_tls(listener_ip, &options.cert, &options.key).await?;
+    server.add_virtual_host(localhost_vhost).await;
+    server
+        .add_route(Route::get_async("/async", Box::new(async_get)))
+        .await;
+    server.add_route(Route::get("/sync", get)).await;
+    server.add_route(Route::get_static("/", "index.html")).await;
 
-    let listener = TcpListener::bind(&addr).await?;
-
-    loop {
-        let (stream, peer_addr) = listener.accept().await?;
-        let acceptor = acceptor.clone();
-
-        let fut = async move {
-            let mut stream = acceptor.accept(stream).await?;
-
-            if flag_echo {
-                let (mut reader, mut writer) = split(stream);
-                let n = copy(&mut reader, &mut writer).await?;
-                writer.flush().await?;
-                println!("Echo: {} - {}", peer_addr, n);
-            } else {
-                let mut output = sink();
-                stream
-                    .write_all(
-                        &b"HTTP/1.0 200 ok\r\n\
-                            Connection: close\r\n\
-                            Content-length: 12\r\n\
-                            \r\n\
-                            Hello world!"[..],
-                    )
-                    .await?;
-                stream.shutdown().await?;
-                copy(&mut stream, &mut output).await?;
-                println!("Hello: {}", peer_addr);
-            }
-
-            Ok(()) as io::Result<()>
-        };
-
-        tokio::spawn(async move {
-            if let Err(err) = fut.await {
-                eprintln!("{:?}", err);
-            }
-        });
-    }
+    server.serve().await.unwrap();
+    Ok(())
 }
 
 fn async_get(_req: &Request) -> BoxedFuture<String> {

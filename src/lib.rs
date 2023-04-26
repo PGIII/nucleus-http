@@ -6,8 +6,9 @@ use response::Response;
 use routes::{ResolveFunction, Routes};
 use std::{
     fmt::format,
+    io::Read,
     path::{Path, PathBuf},
-    sync::Arc, io::Read,
+    sync::Arc,
 };
 use tokio::{
     self, fs,
@@ -36,78 +37,33 @@ pub struct Server {
     virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
 }
 
-trait Stream: AsyncWrite + AsyncRead + Unpin {
-
-}
+trait Stream: AsyncWrite + AsyncRead + Unpin + Send + Sync{}
 
 // Auto Implement Stream for all types that implent asyncRead + asyncWrite
-impl<T> Stream for T 
-where 
-    T: AsyncRead + AsyncWrite + Unpin{
-
-}
+impl<T> Stream for T where T: AsyncRead + AsyncWrite + Unpin + Send + Sync {}
 
 pub struct Connection {
-    //stream: TcpStream,
     stream: Box<dyn Stream>,
     client_ip: std::net::SocketAddr,
     routes: Routes,
     virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
 }
 
-pub struct TLSConnection<IO> {
-    stream: TlsStream<IO>,
-    client_ip: std::net::SocketAddr,
-    routes: Routes,
-    virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
-}
-
-#[async_trait]
-trait ServerConnection {
-    fn routes(&self) -> Routes;
-    fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>>;
-    async fn write_all(&mut self, src: &[u8]) -> tokio::io::Result<()>;
-    async fn write_response(&mut self, response: Response) -> tokio::io::Result<()>;
-}
-
-#[async_trait]
-impl ServerConnection for TLSConnection<TcpStream> {
-    fn routes(&self) -> Routes {
+impl Connection {
+    pub fn routes(&self) -> Routes {
         return self.routes.clone();
     }
 
-    fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>> {
+    pub fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>> {
         return self.virtual_hosts.clone();
     }
 
-    async fn write_all(&mut self, src: &[u8]) -> tokio::io::Result<()> {
+    pub async fn write_all(&mut self, src: &[u8]) -> tokio::io::Result<()> {
         self.stream.write_all(src).await?;
         Ok(())
     }
 
-    async fn write_response(&mut self, response: Response) -> tokio::io::Result<()> {
-        let response_buffer = response.to_send_buffer();
-        self.write_all(&response_buffer).await?;
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl ServerConnection for Connection {
-    fn routes(&self) -> Routes {
-        return self.routes.clone();
-    }
-
-    fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>> {
-        return self.virtual_hosts.clone();
-    }
-
-    async fn write_all(&mut self, src: &[u8]) -> tokio::io::Result<()> {
-        self.stream.write_all(src).await?;
-        Ok(())
-    }
-
-    async fn write_response(&mut self, response: Response) -> tokio::io::Result<()> {
+    pub async fn write_response(&mut self, response: Response) -> tokio::io::Result<()> {
         let response_buffer = response.to_send_buffer();
         self.write_all(&response_buffer).await?;
         Ok(())
@@ -163,23 +119,12 @@ impl Server {
 
     pub async fn accept(&self) -> tokio::io::Result<Connection> {
         let (stream, client_ip) = self.listener.accept().await?;
-
-        Ok(Connection {
-            client_ip,
-            stream: Box::new(stream),
-            routes: self.routes(),
-            virtual_hosts: self.virtual_hosts(),
-        })
-    }
-
-    pub async fn accept_tls(&self) -> tokio::io::Result<TLSConnection<TcpStream>> {
-        let (stream, client_ip) = self.listener.accept().await?;
         if let Some(acceptor) = &self.acceptor {
             let acceptor = acceptor.clone();
             match acceptor.accept(stream).await {
-                Ok(s) => Ok(TLSConnection {
+                Ok(s) => Ok(Connection {
                     client_ip,
-                    stream: tokio_rustls::TlsStream::Server(s),
+                    stream: Box::new(tokio_rustls::TlsStream::Server(s)),
                     routes: self.routes(),
                     virtual_hosts: self.virtual_hosts(),
                 }),
@@ -191,70 +136,65 @@ impl Server {
                 }
             }
         } else {
-            return Err(tokio::io::Error::new(
-                tokio::io::ErrorKind::Other,
-                "Error No TLS Acceptor",
-            ));
+            return Ok(Connection {
+                client_ip,
+                stream: Box::new(stream),
+                routes: self.routes(),
+                virtual_hosts: self.virtual_hosts(),
+            });
         }
-    }
-
-    pub async fn handle_serve(connection: &(impl ServerConnection)) {
-        tokio::spawn(async move {
-            let mut request_str = String::new();
-            loop {
-                let mut buffer = vec![0; 1024]; //Vector to avoid buffer on stack
-                match connection.read(&mut buffer).await {
-                    Ok(0) => {
-                        log::debug!("Connection Terminated by client");
-                        break;
-                    }
-                    Ok(n) => {
-                        //got some bytes append them and see if we need to do any proccessing
-                        for i in 0..n {
-                            request_str.push(buffer[i] as char);
-                            let request_result = request::Request::from_string(request_str.clone());
-                            match request_result {
-                                Ok(r) => {
-                                    let response = Self::route(&r, connection).await;
-                                    connection.write_response(response).await.unwrap();
-                                    request_str.clear();
-                                }
-                                Err(e) => match e {
-                                    request::Error::InvalidString
-                                    | request::Error::MissingBlankLine => {
-                                        //Parital response keep reading
-                                    }
-                                    _ => {
-                                        let error_res = format!("400 bad request: {}", e);
-                                        let response = Response::error(
-                                            http::StatusCode::ErrBadRequest,
-                                            error_res.into(),
-                                        );
-                                        if let Err(err) = connection.write_response(response).await
-                                        {
-                                            log::error!("Error Writing Data: {}", err.to_string());
-                                        }
-                                    }
-                                },
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        log::error!("Socket read error: {}", err.to_string());
-                        break;
-                    }
-                }
-            }
-        });
     }
 
     pub async fn serve(&self) -> tokio::io::Result<()> {
         loop {
-            if self.acceptor.is_some() {
-                let connection = self.accept_tls().await?;
-            } else {
-                let connection = self.accept().await?;
-            }
+            let mut connection = self.accept().await?;
+            tokio::spawn(async move {
+                let mut request_str = String::new();
+                loop {
+                    let mut buffer = vec![0; 1024]; //Vector to avoid buffer on stack
+                    match connection.stream.read(&mut buffer).await {
+                        Ok(0) => {
+                            log::debug!("Connection Terminated by client");
+                            break;
+                        }
+                        Ok(n) => {
+                            //got some bytes append them and see if we need to do any proccessing
+                            for i in 0..n {
+                                request_str.push(buffer[i] as char);
+                                let request_result = request::Request::from_string(request_str.clone());
+                                match request_result {
+                                    Ok(r) => {
+                                        let response = Self::route(&r, &connection).await;
+                                        connection.write_response(response).await.unwrap();
+                                        request_str.clear();
+                                    }
+                                    Err(e) => match e {
+                                        request::Error::InvalidString
+                                            | request::Error::MissingBlankLine => {
+                                                //Parital response keep reading
+                                            }
+                                        _ => {
+                                            let error_res = format!("400 bad request: {}", e);
+                                            let response = Response::error(
+                                                http::StatusCode::ErrBadRequest,
+                                                error_res.into(),
+                                            );
+                                            if let Err(err) = connection.write_response(response).await
+                                            {
+                                                log::error!("Error Writing Data: {}", err.to_string());
+                                            }
+                                        }
+                                    },
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            log::error!("Socket read error: {}", err.to_string());
+                            break;
+                        }
+                    }
+                }
+            });
         }
     }
 
@@ -268,7 +208,7 @@ impl Server {
         return Response::from(blocking.unwrap());
     }
 
-    async fn route(request: &Request, connection: &(impl ServerConnection)) -> Response {
+    async fn route(request: &Request, connection: &Connection) -> Response {
         log::info!("{} Request for: {}", request.method(), request.path());
         let routes = connection.routes();
         let routes_locked = routes.read().await;
@@ -310,10 +250,7 @@ impl Server {
         return response;
     }
 
-    async fn get_vhost_dir(
-        request: &Request,
-        connection: &(impl ServerConnection),
-    ) -> Option<PathBuf> {
+    async fn get_vhost_dir(request: &Request, connection: &Connection) -> Option<PathBuf> {
         for vhost in &*connection.virtual_hosts().read().await {
             if vhost.hostname() == request.hostname() {
                 return Some(vhost.root_dir().to_path_buf());
