@@ -1,3 +1,5 @@
+use core::fmt;
+
 use crate::http::{Header, Method, Version};
 
 #[derive(PartialEq, Debug, Clone)]
@@ -17,6 +19,29 @@ pub enum Error {
     InvalidHTTPVersion,
     MissingBlankLine,
     NoHostHeader,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", String::from(self))
+    }
+}
+impl From<&Error> for String {
+    fn from(value: &Error) -> Self {
+        match value {
+            Error::InvalidString => "Invalid String".to_string(),
+            Error::NoHostHeader => "No VHost Specified".to_string(),
+            Error::InvalidMethod => "Invalid Method Requested".to_string(),
+            Error::InvalidHTTPVersion => "Unsupported HTTP version Request".to_string(),
+            Error::MissingBlankLine => "Missing Blank Line".to_string(),
+        }
+    }
+}
+
+impl From<Error> for String {
+    fn from(value: Error) -> Self {
+        String::from(&value)
+    }
 }
 
 impl Request {
