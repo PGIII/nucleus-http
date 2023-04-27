@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use http::MimeType;
 use log;
 use request::Request;
