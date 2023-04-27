@@ -14,11 +14,6 @@ use std::fs::File;
 use std::io::{self, BufReader};
 use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tokio::io::{copy, sink, split, AsyncWriteExt};
-use tokio::net::TcpListener;
-use tokio_rustls::rustls::{self, Certificate, PrivateKey};
-use tokio_rustls::TlsAcceptor;
 
 /// Tokio Rustls server example
 #[derive(FromArgs)]
@@ -34,10 +29,6 @@ struct Options {
     /// key file
     #[argh(option, short = 'k')]
     key: PathBuf,
-
-    /// echo mode
-    #[argh(switch, short = 'e')]
-    echo_mode: bool,
 }
 
 #[tokio::main]
@@ -50,7 +41,7 @@ async fn main() -> tokio::io::Result<()> {
         .to_socket_addrs()?
         .next()
         .ok_or_else(|| io::Error::from(io::ErrorKind::AddrNotAvailable))?;
-    let listener_ip = "0.0.0.0:8443";
+    let listener_ip = &addr.to_string();
     log::info!("Listening on {listener_ip}");
     let localhost_vhost = VirtualHost::new(
         "localhost",
@@ -76,31 +67,4 @@ fn async_get(_req: &Request) -> BoxedFuture<String> {
 
 fn get(_req: &Request) -> String {
     "Hello From Sync Func".to_string()
-}
-
-/// Load all keys and certs from list of files passed
-fn load_keys_and_certs(paths: &Vec<&Path>) -> io::Result<(Vec<PrivateKey>, Vec<Certificate>)> {
-    let mut keys = vec![];
-    let mut certs = vec![];
-    for path in paths {
-        let items = read_all(&mut BufReader::new(File::open(path)?))?;
-        for item in items {
-            match item {
-                rustls_pemfile::Item::RSAKey(key) => {
-                    keys.push(PrivateKey(key));
-                }
-                rustls_pemfile::Item::ECKey(key) => {
-                    keys.push(PrivateKey(key));
-                }
-                rustls_pemfile::Item::PKCS8Key(key) => {
-                    keys.push(PrivateKey(key));
-                }
-                rustls_pemfile::Item::X509Certificate(cert) => {
-                    certs.push(Certificate(cert));
-                }
-                _ => {}
-            }
-        }
-    }
-    Ok((keys, certs))
 }

@@ -5,21 +5,17 @@ use request::Request;
 use response::Response;
 use routes::{ResolveFunction, Routes};
 use std::{
-    fmt::format,
-    io::Read,
     path::{Path, PathBuf},
     sync::Arc,
 };
 use tokio::{
     self, fs,
-    io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    net::{unix::SocketAddr, TcpListener, TcpStream},
-    sync::Mutex,
-    sync::RwLock,
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    sync::RwLock, net::TcpListener,
 };
 use tokio_rustls::{
     rustls::{self, Certificate, PrivateKey},
-    TlsAcceptor, TlsStream,
+    TlsAcceptor,
 };
 
 pub mod http;
