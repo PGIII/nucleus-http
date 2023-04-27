@@ -239,6 +239,15 @@ impl Server {
                             return Self::get_file(path).await;
                         }
                     }
+                    routes::RouteResolver::RedirectAll(redirect_to) => {
+                        let mut response = Response::new(
+                            http::StatusCode::MovedPermanetly,
+                            vec![],
+                            MimeType::PlainText,
+                        );
+                        response.add_header("Location", redirect_to);
+                        return response;
+                    }
                 }
             }
         }
@@ -293,8 +302,12 @@ impl Server {
         }
     }
 
+    ///FIXME: this should be a little more robust and look for wild cards only if not route is
+    ///defined.
+    ///as well as look for redirect all paths first and default to them
+    ///for now if you want redirect all that should be the only route on the server
     fn routes_request_match(request: &Request, route: &routes::Route) -> bool {
-        let path_match = request.path() == route.path();
+        let path_match = request.path() == route.path() || route.path() == "*";
         let methods_match = request.method() == route.method();
         return methods_match && path_match;
     }

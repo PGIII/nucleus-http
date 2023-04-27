@@ -62,6 +62,11 @@ impl Response {
         }
         return buffer;
     }
+
+    pub fn add_header(&mut self, key: &str, value: &str) {
+        let header = Header::new(key, value);
+        self.headers.push(header);
+    }
 }
 
 impl From<Vec<u8>> for Response {

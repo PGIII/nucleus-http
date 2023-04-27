@@ -10,6 +10,7 @@ pub enum RouteResolver {
     Static { file_path: String },
     AsyncFunction(ResolveAsyncFunction),
     Function(ResolveFunction),
+    RedirectAll(String),
 }
 
 pub struct Route {
@@ -25,6 +26,15 @@ pub fn new_routes() -> Routes {
 }
 
 impl Route {
+    pub fn redirect_all(redirect_url: &str) -> Route {
+        let method = Method::GET;
+        Route {
+            path: "*".to_string(),
+            resolver: RouteResolver::RedirectAll(redirect_url.to_string()),
+            method
+        }
+    }
+
     pub fn get(path: &str, resolve_func: ResolveFunction) -> Route {
         let method = Method::GET;
         let resolver = RouteResolver::Function(resolve_func);
