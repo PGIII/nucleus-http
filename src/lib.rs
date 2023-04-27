@@ -10,7 +10,8 @@ use std::{
 use tokio::{
     self, fs,
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    sync::RwLock, net::TcpListener,
+    net::TcpListener,
+    sync::RwLock,
 };
 use tokio_rustls::{
     rustls::{self, Certificate, PrivateKey},
@@ -32,7 +33,7 @@ pub struct Server {
     virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
 }
 
-trait Stream: AsyncWrite + AsyncRead + Unpin + Send + Sync{}
+trait Stream: AsyncWrite + AsyncRead + Unpin + Send + Sync {}
 
 // Auto Implement Stream for all types that implent asyncRead + asyncWrite
 impl<T> Stream for T where T: AsyncRead + AsyncWrite + Unpin + Send + Sync {}
@@ -142,54 +143,68 @@ impl Server {
 
     pub async fn serve(&self) -> tokio::io::Result<()> {
         loop {
-            let mut connection = self.accept().await?;
-            tokio::spawn(async move {
-                let mut request_str = String::new();
-                loop {
-                    let mut buffer = vec![0; 1024]; //Vector to avoid buffer on stack
-                    match connection.stream.read(&mut buffer).await {
-                        Ok(0) => {
-                            log::debug!("Connection Terminated by client");
-                            break;
-                        }
-                        Ok(n) => {
-                            //got some bytes append them and see if we need to do any proccessing
-                            for i in 0..n {
-                                request_str.push(buffer[i] as char);
-                                let request_result = request::Request::from_string(request_str.clone());
-                                match request_result {
-                                    Ok(r) => {
-                                        let response = Self::route(&r, &connection).await;
-                                        connection.write_response(response).await.unwrap();
-                                        request_str.clear();
-                                    }
-                                    Err(e) => match e {
-                                        request::Error::InvalidString
-                                            | request::Error::MissingBlankLine => {
-                                                //Parital response keep reading
+            let accept_attempt = self.accept().await;
+            match accept_attempt {
+                Ok(mut connection) => {
+                    log::info!("Accepted Connection From {}", connection.client_ip);
+                    tokio::spawn(async move {
+                        let mut request_str = String::new();
+                        loop {
+                            let mut buffer = vec![0; 1024]; //Vector to avoid buffer on stack
+                            match connection.stream.read(&mut buffer).await {
+                                Ok(0) => {
+                                    log::debug!("Connection Terminated by client");
+                                    break;
+                                }
+                                Ok(n) => {
+                                    //got some bytes append them and see if we need to do any proccessing
+                                    for i in 0..n {
+                                        request_str.push(buffer[i] as char);
+                                        let request_result =
+                                            request::Request::from_string(request_str.clone());
+                                        match request_result {
+                                            Ok(r) => {
+                                                let response = Self::route(&r, &connection).await;
+                                                connection.write_response(response).await.unwrap();
+                                                request_str.clear();
                                             }
-                                        _ => {
-                                            let error_res = format!("400 bad request: {}", e);
-                                            let response = Response::error(
-                                                http::StatusCode::ErrBadRequest,
-                                                error_res.into(),
-                                            );
-                                            if let Err(err) = connection.write_response(response).await
-                                            {
-                                                log::error!("Error Writing Data: {}", err.to_string());
-                                            }
+                                            Err(e) => match e {
+                                                request::Error::InvalidString
+                                                | request::Error::MissingBlankLine => {
+                                                    //Parital response keep reading
+                                                }
+                                                _ => {
+                                                    let error_res =
+                                                        format!("400 bad request: {}", e);
+                                                    let response = Response::error(
+                                                        http::StatusCode::ErrBadRequest,
+                                                        error_res.into(),
+                                                    );
+                                                    if let Err(err) =
+                                                        connection.write_response(response).await
+                                                    {
+                                                        log::error!(
+                                                            "Error Writing Data: {}",
+                                                            err.to_string()
+                                                        );
+                                                    }
+                                                }
+                                            },
                                         }
-                                    },
+                                    }
+                                }
+                                Err(err) => {
+                                    log::error!("Socket read error: {}", err.to_string());
+                                    break;
                                 }
                             }
                         }
-                        Err(err) => {
-                            log::error!("Socket read error: {}", err.to_string());
-                            break;
-                        }
-                    }
+                    });
                 }
-            });
+                Err(e) => {
+                    log::error!("Error Accepting Connection: {}", e.to_string());
+                }
+            }
         }
     }
 
