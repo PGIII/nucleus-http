@@ -59,8 +59,10 @@ async fn main() -> tokio::io::Result<()> {
     server.add_route(Route::get("/sync", get)).await;
     server.add_route(Route::get_static("/", "index.html")).await;
     */
-    tokio::spawn(launch_http(addr, tls_addr));
-    request_cert().unwrap();
+    tokio::task::spawn_blocking(move || {
+        request_cert().unwrap();
+    });
+    launch_http(addr, tls_addr).await.unwrap();
     //server.serve().await.unwrap();
     Ok(())
 }
@@ -74,9 +76,9 @@ async fn launch_http(
     log::info!("Redirecting all on {addr} to {tls_addr}");
     let mut server = Server::bind(&listener_ip.to_string()).await?;
     server.add_virtual_host(localhost_vhost).await;
-    server
-        .add_route(Route::redirect_all(&format!("https://{tls_addr}/")))
-    .await;
+    //server
+    //    .add_route(Route::redirect_all(&format!("https://{tls_addr}/")))
+    //.await;
     server.add_route(Route::get("/.well-known/*", challenge_serve)).await;
     server.serve().await?;
     Ok(())
