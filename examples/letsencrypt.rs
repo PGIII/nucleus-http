@@ -145,6 +145,7 @@ fn request_cert() -> Result<(), acme_lib::Error> {
         // update_my_web_server(&path, &proof);
         let mut locked = CHALLENGE_RESPONSE.write().unwrap();
         *locked = proof.clone();
+        drop(locked); //free mutex
 
         // After the file is accessible from the web, the calls
         // this to tell the ACME API to start checking the
