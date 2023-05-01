@@ -165,8 +165,19 @@ impl Server {
                                         match request_result {
                                             Ok(r) => {
                                                 let response = Self::route(&r, &connection).await;
-                                                connection.write_response(response).await.unwrap();
-                                                request_str.clear();
+                                                if let Err(error) =
+                                                    connection.write_response(response).await
+                                                {
+                                                    // not clearing string here so we can try
+                                                    // again, otherwise might be terminated
+                                                    // connection which will be handled
+                                                    log::error!(
+                                                        "Error Writing response: {}",
+                                                        error.to_string()
+                                                    );
+                                                } else {
+                                                    request_str.clear();
+                                                }
                                             }
                                             Err(e) => match e {
                                                 request::Error::InvalidString
