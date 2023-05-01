@@ -1,5 +1,5 @@
-use crate::{http::Method, request};
-use std::{future::Future, pin::Pin, sync::Arc};
+use crate::{http::Method, request::{self, Request}};
+use std::{future::Future, pin::Pin, sync::Arc, collections::HashMap};
 use tokio::sync::RwLock;
 
 pub type ResolveFunction = fn(&request::Request) -> String;
@@ -19,10 +19,10 @@ pub struct Route {
     resolver: RouteResolver,
 }
 
-pub type Routes = Arc<RwLock<Vec<Route>>>;
+pub type Routes = Arc<RwLock<HashMap<String,Route>>>;
 
 pub fn new_routes() -> Routes {
-    Arc::new(RwLock::new(vec![]))
+    Arc::new(RwLock::new(HashMap::new()))
 }
 
 impl Route {
@@ -82,5 +82,22 @@ impl Route {
 
     pub fn path(&self) -> &str {
         return &self.path;
+    }
+
+    ///FIXME: this should be a little more robust and look for wild cards only if not route is
+    ///defined.
+    ///as well as look for redirect all paths first and default to them
+    ///for now if you want redirect all that should be the only route on the server
+    pub fn matches_request(&self, request: &Request) -> bool {
+        if request.method() != self.method() {
+            return false;
+        }
+
+        // Check for exact match or if route is wild card
+        let request_path = request.path(); 
+        let route_path = self.path();
+        let path_match = request_path == route_path || route_path == "*";
+
+        return path_match;
     }
 }

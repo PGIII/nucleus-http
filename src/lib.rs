@@ -4,6 +4,7 @@ use request::Request;
 use response::Response;
 use routes::{ResolveFunction, Routes};
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -69,14 +70,14 @@ impl Connection {
 impl Server {
     pub async fn add_route(&mut self, route: routes::Route) {
         let mut routes_locked = self.routes.write().await;
-        routes_locked.push(route);
+        routes_locked.insert(route.path().to_string(), route);
     }
 
     pub async fn bind(ip: &str) -> Result<Server, tokio::io::Error> {
         let listener = tokio::net::TcpListener::bind(ip).await?;
         Ok(Server {
             listener,
-            routes: Arc::new(RwLock::new(vec![])),
+            routes: routes::new_routes(),
             virtual_hosts: Arc::new(RwLock::new(vec![])),
             acceptor: None,
         })
@@ -94,7 +95,7 @@ impl Server {
         let listener = tokio::net::TcpListener::bind(ip).await?;
         Ok(Server {
             listener,
-            routes: Arc::new(RwLock::new(vec![])),
+            routes: routes::new_routes(),
             virtual_hosts: Arc::new(RwLock::new(vec![])),
             acceptor: Some(acceptor),
         })
@@ -233,35 +234,57 @@ impl Server {
         log::info!("{} Request for: {}", request.method(), request.path());
         let routes = connection.routes();
         let routes_locked = routes.read().await;
+        let mut matching_route = None;
 
-        for route in &*routes_locked {
-            if Self::routes_request_match(request, &route) {
-                match route.resolver() {
-                    routes::RouteResolver::AsyncFunction(func) => {
-                        let func_return = func(&request).await;
-                        return Response::from(func_return);
-                    }
-                    routes::RouteResolver::Function(func) => {
-                        return Self::run_sync_func(request.to_owned(), func.to_owned()).await;
-                    }
-                    routes::RouteResolver::Static { file_path } => {
-                        if let Some(host_dir) = Self::get_vhost_dir(request, connection).await {
-                            let path = host_dir.join(file_path);
-                            return Self::get_file(path).await;
+        //look for route mathcing requested URL
+        if let Some(route) = routes_locked.get(request.path()) {
+            //found exact route match
+            matching_route = Some(route);
+        } else {
+            // go through ancestors appending * on the end and see if we have any matches
+            let path = Path::new(request.path());
+            if let Some(parent) = path.parent() {
+                let mut ancestors = parent.ancestors();
+                while let Some(a) = ancestors.next() {
+                    log::debug!("checking ancestor: {}", a.to_string_lossy());
+                    if let Some(globed) = a.join("*").to_str() {
+                        if let Some(route) = routes_locked.get(globed) {
+                            matching_route = Some(route);
                         }
-                    }
-                    routes::RouteResolver::RedirectAll(redirect_to) => {
-                        let mut response = Response::new(
-                            http::StatusCode::MovedPermanetly,
-                            vec![],
-                            MimeType::PlainText,
-                        );
-                        response.add_header("Location", redirect_to);
-                        return response;
                     }
                 }
             }
         }
+
+        //serve specific route if we match
+        if let Some(route) = matching_route {
+            match route.resolver() {
+                routes::RouteResolver::AsyncFunction(func) => {
+                    let func_return = func(&request).await;
+                    return Response::from(func_return);
+                }
+                routes::RouteResolver::Function(func) => {
+                    return Self::run_sync_func(request.to_owned(), func.to_owned()).await;
+                }
+                routes::RouteResolver::Static { file_path } => {
+                    if let Some(host_dir) = Self::get_vhost_dir(request, connection).await {
+                        let path = host_dir.join(file_path);
+                        return Self::get_file(path).await;
+                    }
+                }
+                routes::RouteResolver::RedirectAll(redirect_to) => {
+                    let mut response = Response::new(
+                        http::StatusCode::MovedPermanetly,
+                        vec![],
+                        MimeType::PlainText,
+                    );
+                    response.add_header("Location", redirect_to);
+                    return response;
+                }
+            }
+        }
+        
+        //server static files based on vhost
         if let Some(host_dir) = Self::get_vhost_dir(request, connection).await {
             let mut file_path = PathBuf::from(request.path());
             if file_path.is_absolute() {
@@ -311,16 +334,6 @@ impl Server {
                 }
             },
         }
-    }
-
-    ///FIXME: this should be a little more robust and look for wild cards only if not route is
-    ///defined.
-    ///as well as look for redirect all paths first and default to them
-    ///for now if you want redirect all that should be the only route on the server
-    fn routes_request_match(request: &Request, route: &routes::Route) -> bool {
-        let path_match = request.path() == route.path() || route.path() == "*";
-        let methods_match = request.method() == route.method();
-        return methods_match && path_match;
     }
 }
 
