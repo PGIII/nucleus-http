@@ -24,3 +24,6 @@ name = "tls"
 
 [[example]]
 name = "dynamic_route"
+
+[[example]]
+name = "letsencrypt"
