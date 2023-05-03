@@ -9,7 +9,7 @@ use std::{
     future::Future,
     path::{Path, PathBuf},
     pin::Pin,
-    sync::Arc,
+    sync::Arc, io::Repeat,
 };
 use tokio::sync::RwLock;
 
@@ -18,16 +18,30 @@ pub type BoxedFuture<T = ()> = Pin<Box<dyn Future<Output = T> + Send>>;
 pub type ResolveAsyncFunction = Box<dyn Fn(&request::Request) -> BoxedFuture<String> + Send + Sync>;
 
 pub trait RequestResolver<S> {
-    fn resolve(self, state: State<S>, request: &Request) -> String;
+    fn resolve(self, state: State<S>, request: &Request) -> Response;
 }
 
-impl<F, P> RequestResolver<P> for F
+pub trait IntoResponse {
+    fn into_response(self) -> Response;
+}
+
+impl<T> IntoResponse for T 
 where
-    F: Fn(P, &Request) -> String,
+    T: Into<Response>
+{
+    fn into_response(self) -> Response {
+       self.into() 
+    }
+}
+
+impl<F, P, R> RequestResolver<P> for F
+where
+    R: IntoResponse,
+    F: Fn(P, &Request) -> R,
     P: FromRequest<P>,
 {
-    fn resolve(self, state: State<P>, request: &Request) -> String {
-        (self)(P::from_request(state, request), request)
+    fn resolve(self, state: State<P>, request: &Request) -> Response {
+        (self)(P::from_request(state, request), request).into_response()
     }
 }
 
