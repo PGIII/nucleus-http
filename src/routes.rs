@@ -1,8 +1,9 @@
 use crate::{
     http::{self, Method, MimeType},
     request::{self, Request},
-    response::{Response, IntoResponse},
-    Connection, state::{State, FromRequest},
+    response::{IntoResponse, Response},
+    state::{FromRequest, State},
+    Connection,
 };
 use std::{
     collections::HashMap,
@@ -20,7 +21,6 @@ pub type ResolveAsyncFunction = Box<dyn Fn(&request::Request) -> BoxedFuture<Str
 pub trait RequestResolver<S> {
     fn resolve(self, state: State<S>, request: &Request) -> Response;
 }
-
 
 impl<F, P, R> RequestResolver<P> for F
 where
@@ -51,13 +51,13 @@ pub type Routes<R> = Arc<RwLock<HashMap<String, Route<R>>>>;
 
 pub struct Router<S, R> {
     routes: Routes<R>,
-    state: State<S>, 
+    state: State<S>,
 }
 
-impl<S, R> Router<S, R> 
-where 
+impl<S, R> Router<S, R>
+where
     S: Clone + Send + Sync + 'static,
-    R: RequestResolver<S> + Sync + Send + 'static + Copy
+    R: RequestResolver<S> + Sync + Send + 'static + Copy,
 {
     pub fn new(state: S) -> Self {
         let routes = HashMap::new();
@@ -141,7 +141,7 @@ where
                     return response;
                 }
                 RouteResolver::State(resolver) => {
-                    return resolver.resolve(self.state.clone(), request);
+                    return Self::run_resolver(self.state.clone(), resolver.to_owned(), request.to_owned()).await;
                 }
             }
         }
@@ -173,6 +173,13 @@ where
         .await;
         //FIXME: return error response intead of unwap
         return Response::from(blocking.unwrap());
+    }
+
+    async fn run_resolver(state: State<S>, resolver: R, request: Request) -> Response {
+        let blocking =
+            tokio::task::spawn_blocking(move || resolver.resolve(state, &request))
+                .await;
+        return blocking.unwrap();
     }
 
     async fn get_file(path: PathBuf) -> Response {

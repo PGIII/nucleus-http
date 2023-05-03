@@ -22,6 +22,8 @@ fn print_greeting(state: AppState, request: &Request) -> String {
     let mut views_write = views.write().unwrap();
     let response = format!("{} {} and {}, Viewed: {}", state.greeting, request.path(), state.bye, views_write);
     *views_write = *views_write + 1;
+    drop(views_write);
+    std::thread::sleep(std::time::Duration::from_millis(250));
     return response;
 }
 
