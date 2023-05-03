@@ -4,9 +4,24 @@ pub type ResponseBody = Vec<u8>;
 pub struct Response {
     version: Version,
     status: StatusCode,
-    body: ResponseBody, 
+    body: ResponseBody,
     mime: MimeType,
     headers: Vec<Header>,
+}
+
+pub trait IntoResponse {
+    fn into_response(self) -> Response;
+}
+
+/// All types that implent into response already get IntoResponse for free ... does that make this
+/// trait redudant ?
+impl<T> IntoResponse for T
+where
+    T: Into<Response>,
+{
+    fn into_response(self) -> Response {
+        self.into()
+    }
 }
 
 impl Response {
@@ -49,7 +64,7 @@ impl Response {
             headers_string.push_str(&header_string);
             headers_string.push_str("\r\n");
         }
-        let mut buffer:Vec<u8> = Vec::new();
+        let mut buffer: Vec<u8> = Vec::new();
         let response = format!(
             "{version} {status}\r\n\
             Content-Length: {length}\r\n\

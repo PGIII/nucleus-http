@@ -1,7 +1,7 @@
 use crate::{
     http::{self, Method, MimeType},
     request::{self, Request},
-    response::Response,
+    response::{Response, IntoResponse},
     Connection, state::{State, FromRequest},
 };
 use std::{
@@ -9,7 +9,7 @@ use std::{
     future::Future,
     path::{Path, PathBuf},
     pin::Pin,
-    sync::Arc, io::Repeat,
+    sync::Arc,
 };
 use tokio::sync::RwLock;
 
@@ -21,18 +21,6 @@ pub trait RequestResolver<S> {
     fn resolve(self, state: State<S>, request: &Request) -> Response;
 }
 
-pub trait IntoResponse {
-    fn into_response(self) -> Response;
-}
-
-impl<T> IntoResponse for T 
-where
-    T: Into<Response>
-{
-    fn into_response(self) -> Response {
-       self.into() 
-    }
-}
 
 impl<F, P, R> RequestResolver<P> for F
 where
@@ -153,8 +141,7 @@ where
                     return response;
                 }
                 RouteResolver::State(resolver) => {
-                    let func_return = resolver.resolve(self.state.clone(), request);
-                    return func_return.into();
+                    return resolver.resolve(self.state.clone(), request);
                 }
             }
         }
