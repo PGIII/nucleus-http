@@ -2,7 +2,7 @@ use crate::{
     http::{self, Method, MimeType},
     request::{self, Request},
     response::Response,
-    Connection,
+    Connection, state::{State, FromRequest},
 };
 use std::{
     collections::HashMap,
@@ -17,44 +17,73 @@ pub type ResolveFunction = fn(&request::Request) -> String;
 pub type BoxedFuture<T = ()> = Pin<Box<dyn Future<Output = T> + Send>>;
 pub type ResolveAsyncFunction = Box<dyn Fn(&request::Request) -> BoxedFuture<String> + Send + Sync>;
 
-pub enum RouteResolver {
+pub trait RequestResolver<S> {
+    fn resolve(self, state: State<S>, request: &Request);
+}
+
+impl<F, P> RequestResolver<P> for F
+where
+    F: Fn(P, &Request),
+    P: FromRequest<P>,
+{
+    fn resolve(self, state: State<P>, request: &Request) {
+        (self)(P::from_request(state, request), request)
+    }
+}
+
+pub enum RouteResolver<R> {
     Static { file_path: String },
     AsyncFunction(ResolveAsyncFunction),
     Function(ResolveFunction),
     RedirectAll(String),
+    State(R),
 }
 
-pub struct Route {
+pub struct Route<R> {
     method: Method,
     path: String,
-    resolver: RouteResolver,
+    resolver: RouteResolver<R>,
 }
 
-pub type Routes = Arc<RwLock<HashMap<String, Route>>>;
+pub type Routes<R> = Arc<RwLock<HashMap<String, Route<R>>>>;
 
-pub struct Router {
-    routes: Routes,
-    state: bool, //this will be actual state later
+pub struct Router<S, R> {
+    routes: Routes<R>,
+    state: State<S>, 
 }
 
-impl Router {
-    pub fn new() -> Self {
+impl<S, R> Router<S, R> 
+where 
+    S: Clone + Send + Sync + 'static,
+    R: RequestResolver<S> + Sync + Send + 'static + Copy
+{
+    pub fn new(state: S) -> Self {
+        let routes = HashMap::new();
         Router {
-            routes: Self::new_routes(),
-            state: false,
+            routes: Arc::new(RwLock::new(routes)),
+            state: State(state),
         }
     }
 
-    pub async fn add_route(&mut self, route: Route) {
+    pub fn new_with_route(state: S, resolver: R) -> Self {
+        let mut routes = HashMap::new();
+        routes.insert("/".to_owned(), Route::get_state("/", resolver));
+        Router {
+            routes: Arc::new(RwLock::new(routes)),
+            state: State(state),
+        }
+    }
+
+    pub async fn add_route(&mut self, route: Route<R>) {
         let mut routes_locked = self.routes.write().await;
         routes_locked.insert(route.path.clone(), route);
     }
 
-    pub fn routes(&self) -> Routes {
+    pub fn routes(&self) -> Routes<R> {
         return Arc::clone(&self.routes);
     }
 
-    pub fn new_routes() -> Routes {
+    pub fn new_routes() -> Routes<R> {
         Arc::new(RwLock::new(HashMap::new()))
     }
 
@@ -106,8 +135,11 @@ impl Router {
                         vec![],
                         MimeType::PlainText,
                     );
-                    response.add_header("Location", redirect_to);
+                    response.add_header("Location", &redirect_to);
                     return response;
+                }
+                RouteResolver::State(resolver) => {
+                    resolver.resolve(self.state.clone(), request);
                 }
             }
         }
@@ -174,8 +206,8 @@ impl Router {
     }
 }
 
-impl Route {
-    pub fn redirect_all(redirect_url: &str) -> Route {
+impl<R> Route<R> {
+    pub fn redirect_all(redirect_url: &str) -> Route<R> {
         let method = Method::GET;
         Route {
             path: "*".to_string(),
@@ -184,7 +216,7 @@ impl Route {
         }
     }
 
-    pub fn get(path: &str, resolve_func: ResolveFunction) -> Route {
+    pub fn get(path: &str, resolve_func: ResolveFunction) -> Route<R> {
         let method = Method::GET;
         let resolver = RouteResolver::Function(resolve_func);
         Route {
@@ -194,9 +226,19 @@ impl Route {
         }
     }
 
-    pub fn get_async(path: &str, resolve_func: ResolveAsyncFunction) -> Route {
+    pub fn get_async(path: &str, resolve_func: ResolveAsyncFunction) -> Route<R> {
         let method = Method::GET;
         let resolver = RouteResolver::AsyncFunction(resolve_func);
+        Route {
+            path: path.to_string(),
+            resolver,
+            method,
+        }
+    }
+
+    pub fn get_state(path: &str, func: R) -> Self {
+        let method = Method::GET;
+        let resolver = RouteResolver::State(func);
         Route {
             path: path.to_string(),
             resolver,
@@ -209,7 +251,7 @@ impl Route {
     /// {file_path} is a is relative path to static file (without leading /) that will be joined
     /// with vhost root dir to serve
     /// eg. path = / file_path = index.html will remap all "/" requests to index.html
-    pub fn get_static(path: &str, file_path: &str) -> Route {
+    pub fn get_static(path: &str, file_path: &str) -> Route<R> {
         let method = Method::GET;
         let resolver = RouteResolver::Static {
             file_path: file_path.to_string(),
@@ -225,7 +267,7 @@ impl Route {
         return &self.method;
     }
 
-    pub fn resolver(&self) -> &RouteResolver {
+    pub fn resolver(&self) -> &RouteResolver<R> {
         return &self.resolver;
     }
 

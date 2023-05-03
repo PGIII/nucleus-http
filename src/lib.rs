@@ -1,6 +1,15 @@
+pub mod http;
+pub mod methods;
+pub mod request;
+pub mod response;
+pub mod routes;
+pub mod state;
+pub mod thread_pool;
+pub mod virtual_host;
+
 use log;
 use response::Response;
-use routes::Router;
+use routes::{Router, RequestResolver};
 use std::{path::Path, sync::Arc};
 use tokio::{
     self,
@@ -13,18 +22,10 @@ use tokio_rustls::{
     TlsAcceptor,
 };
 
-pub mod http;
-pub mod methods;
-pub mod request;
-pub mod response;
-pub mod routes;
-pub mod thread_pool;
-pub mod virtual_host;
-
-pub struct Server {
+pub struct Server<S, R> {
     listener: TcpListener,
     acceptor: Option<TlsAcceptor>,
-    router: Arc<RwLock<Router>>,
+    router: Arc<RwLock<Router<S, R>>>,
     virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
 }
 
@@ -56,8 +57,12 @@ impl Connection {
     }
 }
 
-impl Server {
-    pub async fn bind(ip: &str, router: Router) -> Result<Server, tokio::io::Error> {
+impl<S, R> Server<S, R> 
+where
+    S: Clone + Send + Sync +'static,
+    R: RequestResolver<S> + Sync + Send + 'static + Copy
+{
+    pub async fn bind(ip: &str, router: Router<S, R>) -> Result<Self, tokio::io::Error> {
         let listener = tokio::net::TcpListener::bind(ip).await?;
         Ok(Server {
             listener,
@@ -71,8 +76,8 @@ impl Server {
         ip: &str,
         cert: &Path,
         key: &Path,
-        router: Router,
-    ) -> Result<Server, tokio::io::Error> {
+        router: Router<S, R>,
+    ) -> Result<Self, tokio::io::Error> {
         let files = vec![cert, key];
         let (mut keys, certs) = load_keys_and_certs(&files)?;
         let config = rustls::ServerConfig::builder()

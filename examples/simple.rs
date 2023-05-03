@@ -8,6 +8,20 @@ use tokio;
 use pretty_env_logger;
 use log;
 
+#[derive(Debug, Clone)]
+struct AppState {
+    greeting: String,
+    bye: String,
+}
+
+fn print_greeting(state: AppState, request: &Request) {
+    println!("{} {} and {}", state.greeting, request.path(), state.bye);
+}
+
+fn print_req(request: &Request) {
+    println!("{}", request.path());
+}
+
 #[tokio::main]
 async fn main() -> tokio::io::Result<()> {
     pretty_env_logger::init();
@@ -19,7 +33,13 @@ async fn main() -> tokio::io::Result<()> {
         "/Users/prestongarrisoniii/dev/source/nucleus-http/",
     );
     
-    let mut router = Router::new();
+    let state = AppState {
+        greeting: "HI".to_owned(),
+        bye: "Bye".to_owned(),
+    };
+    let mut router = Router::new(state);
+    router.add_route(Route::get_state("/state", print_greeting)).await;
+    //router.add_route(Route::get_state("/req", print_req)).await;
     router.add_route(Route::get_async("/async", Box::new(async_get))).await;
     router.add_route(Route::get("/sync", get)).await;
     router.add_route(Route::get_static("/", "index.html")).await;
