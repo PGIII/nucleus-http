@@ -2,7 +2,7 @@ use http::MimeType;
 use log;
 use request::Request;
 use response::Response;
-use routes::{ResolveFunction, Routes};
+use routes::{ResolveFunction, Routes, Router};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -30,7 +30,7 @@ pub mod virtual_host;
 pub struct Server {
     listener: TcpListener,
     acceptor: Option<TlsAcceptor>,
-    routes: Routes,
+    router: Router,
     virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
 }
 
@@ -68,22 +68,17 @@ impl Connection {
 }
 
 impl Server {
-    pub async fn add_route(&mut self, route: routes::Route) {
-        let mut routes_locked = self.routes.write().await;
-        routes_locked.insert(route.path().to_string(), route);
-    }
-
-    pub async fn bind(ip: &str) -> Result<Server, tokio::io::Error> {
+    pub async fn bind(ip: &str, router: Router) -> Result<Server, tokio::io::Error> {
         let listener = tokio::net::TcpListener::bind(ip).await?;
         Ok(Server {
             listener,
-            routes: routes::new_routes(),
+            router,
             virtual_hosts: Arc::new(RwLock::new(vec![])),
             acceptor: None,
         })
     }
 
-    pub async fn bind_tls(ip: &str, cert: &Path, key: &Path) -> Result<Server, tokio::io::Error> {
+    pub async fn bind_tls(ip: &str, cert: &Path, key: &Path, router: Router) -> Result<Server, tokio::io::Error> {
         let files = vec![cert, key];
         let (mut keys, certs) = load_keys_and_certs(&files)?;
         let config = rustls::ServerConfig::builder()
@@ -95,14 +90,10 @@ impl Server {
         let listener = tokio::net::TcpListener::bind(ip).await?;
         Ok(Server {
             listener,
-            routes: routes::new_routes(),
+            router,
             virtual_hosts: Arc::new(RwLock::new(vec![])),
             acceptor: Some(acceptor),
         })
-    }
-
-    pub fn routes(&self) -> Routes {
-        return Arc::clone(&self.routes);
     }
 
     pub fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>> {
@@ -122,7 +113,7 @@ impl Server {
                 Ok(s) => Ok(Connection {
                     client_ip,
                     stream: Box::new(tokio_rustls::TlsStream::Server(s)),
-                    routes: self.routes(),
+                    routes: self.router.routes(),
                     virtual_hosts: self.virtual_hosts(),
                 }),
                 Err(_) => {
@@ -136,7 +127,7 @@ impl Server {
             return Ok(Connection {
                 client_ip,
                 stream: Box::new(stream),
-                routes: self.routes(),
+                routes: self.router.routes(),
                 virtual_hosts: self.virtual_hosts(),
             });
         }

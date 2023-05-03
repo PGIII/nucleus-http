@@ -1,6 +1,6 @@
 use nucleus_http::{
     request::Request,
-    routes::{BoxedFuture, Route},
+    routes::{BoxedFuture, Route, Router},
     virtual_host::VirtualHost,
     Server,
 };
@@ -18,14 +18,13 @@ async fn main() -> tokio::io::Result<()> {
         "0.0.0.0:7878",
         "/Users/prestongarrisoniii/dev/source/nucleus-http/",
     );
-
-    let mut server = Server::bind(listener_ip).await?;
+    
+    let mut router = Router::new();
+    router.add_route(Route::get_async("/async", Box::new(async_get))).await;
+    router.add_route(Route::get("/sync", get)).await;
+    router.add_route(Route::get_static("/", "index.html")).await;
+    let mut server = Server::bind(listener_ip, router).await?;
     server.add_virtual_host(localhost_vhost).await;
-    server
-        .add_route(Route::get_async("/async", Box::new(async_get)))
-        .await;
-    server.add_route(Route::get("/sync", get)).await;
-    server.add_route(Route::get_static("/", "index.html")).await;
 
     server.serve().await.unwrap();
     return Ok(());

@@ -21,8 +21,31 @@ pub struct Route {
 
 pub type Routes = Arc<RwLock<HashMap<String,Route>>>;
 
-pub fn new_routes() -> Routes {
-    Arc::new(RwLock::new(HashMap::new()))
+pub struct Router {
+    routes: Routes,
+    state: bool, //this will be actual state later
+}
+
+impl Router {
+    pub fn new() -> Self {
+        Router {
+            routes: Self::new_routes(),
+            state: false,
+        }
+    }
+
+    pub async fn add_route(&mut self, route: Route) {
+        let mut routes_locked = self.routes.write().await;
+        routes_locked.insert(route.path.clone(), route);
+    }
+
+    pub fn routes(&self) -> Routes {
+        return Arc::clone(&self.routes);
+    }
+
+    pub fn new_routes() -> Routes {
+        Arc::new(RwLock::new(HashMap::new()))
+    }
 }
 
 impl Route {
