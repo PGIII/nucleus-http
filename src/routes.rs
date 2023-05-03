@@ -18,15 +18,15 @@ pub type BoxedFuture<T = ()> = Pin<Box<dyn Future<Output = T> + Send>>;
 pub type ResolveAsyncFunction = Box<dyn Fn(&request::Request) -> BoxedFuture<String> + Send + Sync>;
 
 pub trait RequestResolver<S> {
-    fn resolve(self, state: State<S>, request: &Request);
+    fn resolve(self, state: State<S>, request: &Request) -> String;
 }
 
 impl<F, P> RequestResolver<P> for F
 where
-    F: Fn(P, &Request),
+    F: Fn(P, &Request) -> String,
     P: FromRequest<P>,
 {
-    fn resolve(self, state: State<P>, request: &Request) {
+    fn resolve(self, state: State<P>, request: &Request) -> String {
         (self)(P::from_request(state, request), request)
     }
 }
@@ -139,7 +139,8 @@ where
                     return response;
                 }
                 RouteResolver::State(resolver) => {
-                    resolver.resolve(self.state.clone(), request);
+                    let func_return = resolver.resolve(self.state.clone(), request);
+                    return func_return.into();
                 }
             }
         }

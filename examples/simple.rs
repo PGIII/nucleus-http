@@ -1,3 +1,5 @@
+use std::sync::{RwLock, Arc};
+
 use nucleus_http::{
     request::Request,
     routes::{BoxedFuture, Route, Router},
@@ -12,14 +14,15 @@ use log;
 struct AppState {
     greeting: String,
     bye: String,
+    views: Arc<RwLock<u32>>,
 }
 
-fn print_greeting(state: AppState, request: &Request) {
-    println!("{} {} and {}", state.greeting, request.path(), state.bye);
-}
-
-fn print_req(request: &Request) {
-    println!("{}", request.path());
+fn print_greeting(state: AppState, request: &Request) -> String {
+    let views = state.views.clone();
+    let mut views_write = views.write().unwrap();
+    let response = format!("{} {} and {}, Viewed: {}", state.greeting, request.path(), state.bye, views_write);
+    *views_write = *views_write + 1;
+    return response;
 }
 
 #[tokio::main]
@@ -36,6 +39,7 @@ async fn main() -> tokio::io::Result<()> {
     let state = AppState {
         greeting: "HI".to_owned(),
         bye: "Bye".to_owned(),
+        views: Arc::new(RwLock::new(0))
     };
     let mut router = Router::new(state);
     router.add_route(Route::get_state("/state", print_greeting)).await;
