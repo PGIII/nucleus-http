@@ -1,15 +1,9 @@
-use http::MimeType;
 use log;
-use request::Request;
 use response::Response;
-use routes::{ResolveFunction, Routes, Router};
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use routes::Router;
+use std::{path::Path, sync::Arc};
 use tokio::{
-    self, fs,
+    self,
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::TcpListener,
     sync::RwLock,
@@ -30,7 +24,7 @@ pub mod virtual_host;
 pub struct Server {
     listener: TcpListener,
     acceptor: Option<TlsAcceptor>,
-    router: Router,
+    router: Arc<RwLock<Router>>,
     virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
 }
 
@@ -42,15 +36,10 @@ impl<T> Stream for T where T: AsyncRead + AsyncWrite + Unpin + Send + Sync {}
 pub struct Connection {
     stream: Box<dyn Stream>,
     client_ip: std::net::SocketAddr,
-    routes: Routes,
     virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
 }
 
 impl Connection {
-    pub fn routes(&self) -> Routes {
-        return self.routes.clone();
-    }
-
     pub fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>> {
         return self.virtual_hosts.clone();
     }
@@ -72,13 +61,18 @@ impl Server {
         let listener = tokio::net::TcpListener::bind(ip).await?;
         Ok(Server {
             listener,
-            router,
+            router: Arc::new(RwLock::new(router)),
             virtual_hosts: Arc::new(RwLock::new(vec![])),
             acceptor: None,
         })
     }
 
-    pub async fn bind_tls(ip: &str, cert: &Path, key: &Path, router: Router) -> Result<Server, tokio::io::Error> {
+    pub async fn bind_tls(
+        ip: &str,
+        cert: &Path,
+        key: &Path,
+        router: Router,
+    ) -> Result<Server, tokio::io::Error> {
         let files = vec![cert, key];
         let (mut keys, certs) = load_keys_and_certs(&files)?;
         let config = rustls::ServerConfig::builder()
@@ -90,7 +84,7 @@ impl Server {
         let listener = tokio::net::TcpListener::bind(ip).await?;
         Ok(Server {
             listener,
-            router,
+            router: Arc::new(RwLock::new(router)),
             virtual_hosts: Arc::new(RwLock::new(vec![])),
             acceptor: Some(acceptor),
         })
@@ -113,7 +107,6 @@ impl Server {
                 Ok(s) => Ok(Connection {
                     client_ip,
                     stream: Box::new(tokio_rustls::TlsStream::Server(s)),
-                    routes: self.router.routes(),
                     virtual_hosts: self.virtual_hosts(),
                 }),
                 Err(_) => {
@@ -127,7 +120,6 @@ impl Server {
             return Ok(Connection {
                 client_ip,
                 stream: Box::new(stream),
-                routes: self.router.routes(),
                 virtual_hosts: self.virtual_hosts(),
             });
         }
@@ -138,6 +130,7 @@ impl Server {
             let accept_attempt = self.accept().await;
             match accept_attempt {
                 Ok(mut connection) => {
+                    let router = self.router.clone();
                     log::info!("Accepted Connection From {}", connection.client_ip);
                     tokio::spawn(async move {
                         let mut request_str = String::new();
@@ -156,7 +149,9 @@ impl Server {
                                             request::Request::from_string(request_str.clone());
                                         match request_result {
                                             Ok(r) => {
-                                                let response = Self::route(&r, &connection).await;
+                                                let router_locked = router.read().await;
+                                                let response =
+                                                    router_locked.route(&r, &connection).await;
                                                 if let Err(error) =
                                                     connection.write_response(response).await
                                                 {
@@ -208,122 +203,6 @@ impl Server {
                     log::error!("Error Accepting Connection: {}", e.to_string());
                 }
             }
-        }
-    }
-
-    async fn run_sync_func(request: Request, func: ResolveFunction) -> Response {
-        let blocking = tokio::task::spawn_blocking(move || {
-            let result = func(&request);
-            return result;
-        })
-        .await;
-        //FIXME: return error response intead of unwap
-        return Response::from(blocking.unwrap());
-    }
-
-    async fn route(request: &Request, connection: &Connection) -> Response {
-        log::info!("{} Request for: {}", request.method(), request.path());
-        let routes = connection.routes();
-        let routes_locked = routes.read().await;
-        let mut matching_route = None;
-
-        //look for route mathcing requested URL
-        if let Some(route) = routes_locked.get(request.path()) {
-            //found exact route match
-            matching_route = Some(route);
-        } else {
-            // go through ancestors appending * on the end and see if we have any matches
-            let path = Path::new(request.path());
-            if let Some(parent) = path.parent() {
-                let mut ancestors = parent.ancestors();
-                while let Some(a) = ancestors.next() {
-                    log::debug!("checking ancestor: {}", a.to_string_lossy());
-                    if let Some(globed) = a.join("*").to_str() {
-                        if let Some(route) = routes_locked.get(globed) {
-                            matching_route = Some(route);
-                        }
-                    }
-                }
-            }
-        }
-
-        //serve specific route if we match
-        if let Some(route) = matching_route {
-            match route.resolver() {
-                routes::RouteResolver::AsyncFunction(func) => {
-                    let func_return = func(&request).await;
-                    return Response::from(func_return);
-                }
-                routes::RouteResolver::Function(func) => {
-                    return Self::run_sync_func(request.to_owned(), func.to_owned()).await;
-                }
-                routes::RouteResolver::Static { file_path } => {
-                    if let Some(host_dir) = Self::get_vhost_dir(request, connection).await {
-                        let path = host_dir.join(file_path);
-                        return Self::get_file(path).await;
-                    }
-                }
-                routes::RouteResolver::RedirectAll(redirect_to) => {
-                    let mut response = Response::new(
-                        http::StatusCode::MovedPermanetly,
-                        vec![],
-                        MimeType::PlainText,
-                    );
-                    response.add_header("Location", redirect_to);
-                    return response;
-                }
-            }
-        }
-        
-        //server static files based on vhost
-        if let Some(host_dir) = Self::get_vhost_dir(request, connection).await {
-            let mut file_path = PathBuf::from(request.path());
-            if file_path.is_absolute() {
-                if let Ok(path) = file_path.strip_prefix("/") {
-                    file_path = path.to_path_buf();
-                } else {
-                    return Response::error(http::StatusCode::ErrNotFound, "File Not Found".into());
-                }
-            }
-            let final_path = host_dir.join(file_path);
-            return Self::get_file(final_path).await;
-        }
-
-        //no route try static serve
-        let response = Response::error(http::StatusCode::ErrNotFound, "File Not Found".into());
-        return response;
-    }
-
-    async fn get_vhost_dir(request: &Request, connection: &Connection) -> Option<PathBuf> {
-        for vhost in &*connection.virtual_hosts().read().await {
-            if vhost.hostname() == request.hostname() {
-                return Some(vhost.root_dir().to_path_buf());
-            }
-        }
-        return None;
-    }
-
-    async fn get_file(path: PathBuf) -> Response {
-        match fs::read(&path).await {
-            Ok(contents) => {
-                let mime: MimeType = path.into();
-                let response = Response::new(http::StatusCode::OK, contents, mime);
-                return response;
-            }
-            Err(err) => match err.kind() {
-                std::io::ErrorKind::PermissionDenied => {
-                    let response =
-                        Response::error(http::StatusCode::ErrForbidden, "Permission Denied".into());
-                    return response;
-                }
-                std::io::ErrorKind::NotFound | _ => {
-                    let response = Response::error(
-                        http::StatusCode::ErrNotFound,
-                        "Static File Not Found".into(),
-                    );
-                    return response;
-                }
-            },
         }
     }
 }

@@ -1,19 +1,16 @@
+use argh::FromArgs;
 use log;
 use nucleus_http::{
     request::Request,
-    routes::{BoxedFuture, Route},
+    routes::{BoxedFuture, Route, Router},
     virtual_host::VirtualHost,
     Server,
 };
 use pretty_env_logger;
-use tokio::{self, net::unix::SocketAddr};
-
-use argh::FromArgs;
-use rustls_pemfile::read_all;
-use std::fs::File;
-use std::io::{self, BufReader};
+use std::io;
 use std::net::ToSocketAddrs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use tokio;
 
 /// Tokio Rustls server example
 #[derive(FromArgs)]
@@ -56,13 +53,15 @@ async fn main() -> tokio::io::Result<()> {
     log::info!("Listening on {listener_ip}");
     let localhost_vhost = VirtualHost::new("localhost", listener_ip, "./");
 
-    let mut server = Server::bind_tls(listener_ip, &options.cert, &options.key).await?;
-    server.add_virtual_host(localhost_vhost).await;
-    server
+    let mut router = Router::new();
+    router
         .add_route(Route::get_async("/async", Box::new(async_get)))
         .await;
-    server.add_route(Route::get("/sync", get)).await;
-    server.add_route(Route::get_static("/", "index.html")).await;
+    router.add_route(Route::get("/sync", get)).await;
+    router.add_route(Route::get_static("/", "index.html")).await;
+
+    let mut server = Server::bind_tls(listener_ip, &options.cert, &options.key, router).await?;
+    server.add_virtual_host(localhost_vhost).await;
 
     tokio::spawn(launch_http(addr, tls_addr));
     server.serve().await.unwrap();
@@ -77,13 +76,18 @@ fn get(_req: &Request) -> String {
     "Hello From Sync Func".to_string()
 }
 
-async fn launch_http(addr: std::net::SocketAddr, tls_addr: std::net::SocketAddr) -> tokio::io::Result<()> {
+async fn launch_http(
+    addr: std::net::SocketAddr,
+    tls_addr: std::net::SocketAddr,
+) -> tokio::io::Result<()> {
     let listener_ip = addr;
     let localhost_vhost = VirtualHost::new("localhost", &listener_ip.to_string(), "./");
     log::info!("Redirecting all on {addr} to {tls_addr}");
-    let mut server = Server::bind(&listener_ip.to_string()).await?;
+    let mut router = Router::new();
+    router.add_route(Route::redirect_all(&format!("https://{tls_addr}/")))
+        .await;
+    let mut server = Server::bind(&listener_ip.to_string(), router).await?;
     server.add_virtual_host(localhost_vhost).await;
-    server.add_route(Route::redirect_all(&format!("https://{tls_addr}/"))).await;
     server.serve().await?;
     Ok(())
 }

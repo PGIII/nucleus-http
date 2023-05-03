@@ -1,5 +1,16 @@
-use crate::{http::Method, request::{self, Request}};
-use std::{future::Future, pin::Pin, sync::Arc, collections::HashMap};
+use crate::{
+    http::{self, Method, MimeType},
+    request::{self, Request},
+    response::Response,
+    Connection,
+};
+use std::{
+    collections::HashMap,
+    future::Future,
+    path::{Path, PathBuf},
+    pin::Pin,
+    sync::Arc,
+};
 use tokio::sync::RwLock;
 
 pub type ResolveFunction = fn(&request::Request) -> String;
@@ -19,7 +30,7 @@ pub struct Route {
     resolver: RouteResolver,
 }
 
-pub type Routes = Arc<RwLock<HashMap<String,Route>>>;
+pub type Routes = Arc<RwLock<HashMap<String, Route>>>;
 
 pub struct Router {
     routes: Routes,
@@ -46,6 +57,121 @@ impl Router {
     pub fn new_routes() -> Routes {
         Arc::new(RwLock::new(HashMap::new()))
     }
+
+    pub async fn route(&self, request: &Request, connection: &Connection) -> Response {
+        log::info!("{} Request for: {}", request.method(), request.path());
+        let routes = self.routes();
+        let routes_locked = routes.read().await;
+        let mut matching_route = None;
+
+        //look for route mathcing requested URL
+        if let Some(route) = routes_locked.get(request.path()) {
+            //found exact route match
+            matching_route = Some(route);
+        } else {
+            // go through ancestors appending * on the end and see if we have any matches
+            let path = Path::new(request.path());
+            if let Some(parent) = path.parent() {
+                let mut ancestors = parent.ancestors();
+                while let Some(a) = ancestors.next() {
+                    log::debug!("checking ancestor: {}", a.to_string_lossy());
+                    if let Some(globed) = a.join("*").to_str() {
+                        if let Some(route) = routes_locked.get(globed) {
+                            matching_route = Some(route);
+                        }
+                    }
+                }
+            }
+        }
+
+        //serve specific route if we match
+        if let Some(route) = matching_route {
+            match route.resolver() {
+                RouteResolver::AsyncFunction(func) => {
+                    let func_return = func(&request).await;
+                    return Response::from(func_return);
+                }
+                RouteResolver::Function(func) => {
+                    return Self::run_sync_func(request.to_owned(), func.to_owned()).await;
+                }
+                RouteResolver::Static { file_path } => {
+                    if let Some(host_dir) = Self::get_vhost_dir(request, connection).await {
+                        let path = host_dir.join(file_path);
+                        return Self::get_file(path).await;
+                    }
+                }
+                RouteResolver::RedirectAll(redirect_to) => {
+                    let mut response = Response::new(
+                        http::StatusCode::MovedPermanetly,
+                        vec![],
+                        MimeType::PlainText,
+                    );
+                    response.add_header("Location", redirect_to);
+                    return response;
+                }
+            }
+        }
+
+        //server static files based on vhost
+        if let Some(host_dir) = Self::get_vhost_dir(request, connection).await {
+            let mut file_path = PathBuf::from(request.path());
+            if file_path.is_absolute() {
+                if let Ok(path) = file_path.strip_prefix("/") {
+                    file_path = path.to_path_buf();
+                } else {
+                    return Response::error(http::StatusCode::ErrNotFound, "File Not Found".into());
+                }
+            }
+            let final_path = host_dir.join(file_path);
+            return Self::get_file(final_path).await;
+        }
+
+        //no route try static serve
+        let response = Response::error(http::StatusCode::ErrNotFound, "File Not Found".into());
+        return response;
+    }
+
+    async fn run_sync_func(request: Request, func: ResolveFunction) -> Response {
+        let blocking = tokio::task::spawn_blocking(move || {
+            let result = func(&request);
+            return result;
+        })
+        .await;
+        //FIXME: return error response intead of unwap
+        return Response::from(blocking.unwrap());
+    }
+
+    async fn get_file(path: PathBuf) -> Response {
+        match tokio::fs::read(&path).await {
+            Ok(contents) => {
+                let mime: MimeType = path.into();
+                let response = Response::new(http::StatusCode::OK, contents, mime);
+                return response;
+            }
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::PermissionDenied => {
+                    let response =
+                        Response::error(http::StatusCode::ErrForbidden, "Permission Denied".into());
+                    return response;
+                }
+                std::io::ErrorKind::NotFound | _ => {
+                    let response = Response::error(
+                        http::StatusCode::ErrNotFound,
+                        "Static File Not Found".into(),
+                    );
+                    return response;
+                }
+            },
+        }
+    }
+    async fn get_vhost_dir(request: &Request, connection: &Connection) -> Option<PathBuf> {
+        for vhost in &*connection.virtual_hosts().read().await {
+            if vhost.hostname() == request.hostname() {
+                return Some(vhost.root_dir().to_path_buf());
+            }
+        }
+        return None;
+    }
 }
 
 impl Route {
@@ -54,7 +180,7 @@ impl Route {
         Route {
             path: "*".to_string(),
             resolver: RouteResolver::RedirectAll(redirect_url.to_string()),
-            method
+            method,
         }
     }
 
@@ -117,7 +243,7 @@ impl Route {
         }
 
         // Check for exact match or if route is wild card
-        let request_path = request.path(); 
+        let request_path = request.path();
         let route_path = self.path();
         let path_match = request_path == route_path || route_path == "*";
 
