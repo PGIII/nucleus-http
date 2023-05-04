@@ -49,6 +49,7 @@ pub struct Route<R> {
 
 pub type Routes<R> = Arc<RwLock<HashMap<String, Route<R>>>>;
 
+#[derive(Clone)]
 pub struct Router<S, R> {
     routes: Routes<R>,
     state: State<S>,
