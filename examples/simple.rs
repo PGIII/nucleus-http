@@ -17,15 +17,6 @@ struct AppState {
     views: Arc<RwLock<u32>>,
 }
 
-fn print_greeting(state: AppState, request: &Request) -> String {
-    let views = state.views.clone();
-    let mut views_write = views.write().unwrap();
-    let response = format!("{} {} and {}, Viewed: {}", state.greeting, request.path(), state.bye, views_write);
-    *views_write = *views_write + 1;
-    drop(views_write);
-    std::thread::sleep(std::time::Duration::from_millis(250));
-    return response;
-}
 
 #[tokio::main]
 async fn main() -> tokio::io::Result<()> {
@@ -47,7 +38,7 @@ async fn main() -> tokio::io::Result<()> {
     router.add_route(Route::get_state("/state", print_greeting)).await;
     //router.add_route(Route::get_state("/req", print_req)).await;
     router.add_route(Route::get_async("/async", Box::new(async_get))).await;
-    router.add_route(Route::get("/sync", get)).await;
+    router.add_route(Route::get_state("/sync", get)).await;
     router.add_route(Route::get_static("/", "index.html")).await;
     let mut server = Server::bind(listener_ip, router).await?;
     server.add_virtual_host(localhost_vhost).await;
@@ -56,10 +47,19 @@ async fn main() -> tokio::io::Result<()> {
     return Ok(());
 }
 
+fn print_greeting(state: AppState, request: &Request) -> String {
+    let views = state.views.clone();
+    let mut views_write = views.write().unwrap();
+    let response = format!("{} {} and {}, Viewed: {}", state.greeting, request.path(), state.bye, views_write);
+    *views_write = *views_write + 1;
+    drop(views_write);
+    return response;
+}
+
 fn async_get(_req: &Request) -> BoxedFuture<String> {
     Box::pin(async move { "Hello From Rust Routes!".to_string() })
 }
 
-fn get(_req: &Request) -> String {
+fn get(_: AppState, request: &Request) -> String {
     "Hello From Sync Func".to_string()
 }

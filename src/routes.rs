@@ -18,47 +18,46 @@ pub type ResolveFunction = fn(&request::Request) -> String;
 pub type BoxedFuture<T = ()> = Pin<Box<dyn Future<Output = T> + Send>>;
 pub type ResolveAsyncFunction = Box<dyn Fn(&request::Request) -> BoxedFuture<String> + Send + Sync>;
 
-pub trait RequestResolver<S> {
-    fn resolve(self, state: State<S>, request: &Request) -> Response;
+pub trait RequestResolver<S>: Send + Sync + 'static {
+    fn resolve(&self, state: State<S>, request: &Request) -> Response;
 }
 
 impl<F, P, R> RequestResolver<P> for F
 where
     R: IntoResponse,
-    F: Fn(P, &Request) -> R,
+    F: Fn(P, &Request) -> R + Send + Sync + 'static,
     P: FromRequest<P>,
 {
-    fn resolve(self, state: State<P>, request: &Request) -> Response {
+    fn resolve(&self, state: State<P>, request: &Request) -> Response {
         (self)(P::from_request(state, request), request).into_response()
     }
 }
 
-pub enum RouteResolver<R> {
+pub enum RouteResolver<S> {
     Static { file_path: String },
     AsyncFunction(ResolveAsyncFunction),
     Function(ResolveFunction),
     RedirectAll(String),
-    State(R),
+    State(Arc<Box<dyn RequestResolver<S>>>),
 }
 
-pub struct Route<R> {
+pub struct Route<S> {
     method: Method,
     path: String,
-    resolver: RouteResolver<R>,
+    resolver: RouteResolver<S>,
 }
 
 pub type Routes<R> = Arc<RwLock<HashMap<String, Route<R>>>>;
 
 #[derive(Clone)]
-pub struct Router<S, R> {
-    routes: Routes<R>,
+pub struct Router<S> {
+    routes: Routes<S>,
     state: State<S>,
 }
 
-impl<S, R> Router<S, R>
+impl<S> Router<S>
 where
     S: Clone + Send + Sync + 'static,
-    R: RequestResolver<S> + Sync + Send + 'static + Copy,
 {
     pub fn new(state: S) -> Self {
         let routes = HashMap::new();
@@ -68,25 +67,29 @@ where
         }
     }
 
-    pub fn new_with_route(state: S, resolver: R) -> Self {
+    pub fn new_with_route<R>(state: S, resolver: R) -> Self
+    where
+        R: RequestResolver<S> + Sync + Send + 'static + Copy + Unpin,
+    {
         let mut routes = HashMap::new();
-        routes.insert("/".to_owned(), Route::get_state("/", resolver));
+        let route = Route::get_state("/", resolver);
+        routes.insert("/".to_owned(), route);
         Router {
             routes: Arc::new(RwLock::new(routes)),
             state: State(state),
         }
     }
 
-    pub async fn add_route(&mut self, route: Route<R>) {
+    pub async fn add_route(&mut self, route: Route<S>) {
         let mut routes_locked = self.routes.write().await;
         routes_locked.insert(route.path.clone(), route);
     }
 
-    pub fn routes(&self) -> Routes<R> {
+    pub fn routes(&self) -> Routes<S> {
         return Arc::clone(&self.routes);
     }
 
-    pub fn new_routes() -> Routes<R> {
+    pub fn new_routes() -> Routes<S> {
         Arc::new(RwLock::new(HashMap::new()))
     }
 
@@ -142,7 +145,13 @@ where
                     return response;
                 }
                 RouteResolver::State(resolver) => {
-                    return Self::run_resolver(self.state.clone(), resolver.to_owned(), request.to_owned()).await;
+                    let resolver = resolver.clone();
+                    return Self::run_resolver(
+                        self.state.clone(),
+                        resolver,
+                        request.to_owned(),
+                    )
+                    .await;
                 }
             }
         }
@@ -176,10 +185,9 @@ where
         return Response::from(blocking.unwrap());
     }
 
-    async fn run_resolver(state: State<S>, resolver: R, request: Request) -> Response {
-        let blocking =
-            tokio::task::spawn_blocking(move || resolver.resolve(state, &request))
-                .await;
+    async fn run_resolver(state: State<S>, resolver: Arc<Box<dyn RequestResolver<S>>>, request: Request) -> Response 
+    {
+        let blocking = tokio::task::spawn_blocking(move || resolver.resolve(state, &request)).await;
         return blocking.unwrap();
     }
 
@@ -216,8 +224,11 @@ where
     }
 }
 
-impl<R> Route<R> {
-    pub fn redirect_all(redirect_url: &str) -> Route<R> {
+impl<S> Route<S> 
+where 
+    S: Clone + Send + Sync + 'static,
+{
+    pub fn redirect_all(redirect_url: &str) -> Self {
         let method = Method::GET;
         Route {
             path: "*".to_string(),
@@ -226,7 +237,7 @@ impl<R> Route<R> {
         }
     }
 
-    pub fn get(path: &str, resolve_func: ResolveFunction) -> Route<R> {
+    pub fn get(path: &str, resolve_func: ResolveFunction) -> Self {
         let method = Method::GET;
         let resolver = RouteResolver::Function(resolve_func);
         Route {
@@ -236,7 +247,7 @@ impl<R> Route<R> {
         }
     }
 
-    pub fn get_async(path: &str, resolve_func: ResolveAsyncFunction) -> Route<R> {
+    pub fn get_async(path: &str, resolve_func: ResolveAsyncFunction) -> Self {
         let method = Method::GET;
         let resolver = RouteResolver::AsyncFunction(resolve_func);
         Route {
@@ -246,9 +257,9 @@ impl<R> Route<R> {
         }
     }
 
-    pub fn get_state(path: &str, func: R) -> Self {
+    pub fn get_state(path: &str, func: impl RequestResolver<S> + 'static) -> Self {
         let method = Method::GET;
-        let resolver = RouteResolver::State(func);
+        let resolver = RouteResolver::State(Arc::new(Box::new(func)));
         Route {
             path: path.to_string(),
             resolver,
@@ -261,7 +272,7 @@ impl<R> Route<R> {
     /// {file_path} is a is relative path to static file (without leading /) that will be joined
     /// with vhost root dir to serve
     /// eg. path = / file_path = index.html will remap all "/" requests to index.html
-    pub fn get_static(path: &str, file_path: &str) -> Route<R> {
+    pub fn get_static(path: &str, file_path: &str) -> Self {
         let method = Method::GET;
         let resolver = RouteResolver::Static {
             file_path: file_path.to_string(),
@@ -277,7 +288,7 @@ impl<R> Route<R> {
         return &self.method;
     }
 
-    pub fn resolver(&self) -> &RouteResolver<R> {
+    pub fn resolver(&self) -> &RouteResolver<S> {
         return &self.resolver;
     }
 

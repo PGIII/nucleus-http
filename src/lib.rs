@@ -22,10 +22,10 @@ use tokio_rustls::{
     TlsAcceptor,
 };
 
-pub struct Server<S, R> {
+pub struct Server<S> {
     listener: TcpListener,
     acceptor: Option<TlsAcceptor>,
-    router: Arc<RwLock<Router<S, R>>>,
+    router: Arc<RwLock<Router<S>>>,
     virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
 }
 
@@ -57,12 +57,11 @@ impl Connection {
     }
 }
 
-impl<S, R> Server<S, R> 
+impl<S> Server<S> 
 where
     S: Clone + Send + Sync +'static,
-    R: RequestResolver<S> + Sync + Send + 'static + Copy
 {
-    pub async fn bind(ip: &str, router: Router<S, R>) -> Result<Self, tokio::io::Error> {
+    pub async fn bind(ip: &str, router: Router<S>) -> Result<Self, tokio::io::Error> {
         let listener = tokio::net::TcpListener::bind(ip).await?;
         Ok(Server {
             listener,
@@ -76,7 +75,7 @@ where
         ip: &str,
         cert: &Path,
         key: &Path,
-        router: Router<S, R>,
+        router: Router<S>,
     ) -> Result<Self, tokio::io::Error> {
         let files = vec![cert, key];
         let (mut keys, certs) = load_keys_and_certs(&files)?;
