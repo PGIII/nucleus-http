@@ -143,3 +143,15 @@ impl From<Response> for String {
         return response;
     }
 }
+
+impl From<std::io::Error> for Response {
+    fn from(error: std::io::Error) -> Self {
+        Response {
+            status: StatusCode::ErrInternalServer,
+            body: error.to_string().into(),
+            mime: MimeType::HTML,
+            version: Version::V1_1,
+            headers: Header::new_server(),
+        }
+    }
+}
