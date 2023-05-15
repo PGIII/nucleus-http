@@ -2,7 +2,7 @@ use std::sync::{RwLock, Arc};
 
 use nucleus_http::{
     request::Request,
-    routes::{BoxedFuture, Route, Router},
+    routes::{Route, Router},
     virtual_host::VirtualHost,
     Server,
 };
@@ -35,10 +35,10 @@ async fn main() -> tokio::io::Result<()> {
         views: Arc::new(RwLock::new(0))
     };
     let mut router = Router::new(state);
-    router.add_route(Route::get_state("/state", print_greeting)).await;
+    let route = Route::get("/state", Box::new(print_greeting));
+    router.add_route(route).await;
     //router.add_route(Route::get_state("/req", print_req)).await;
-    router.add_route(Route::get_async("/async", Box::new(async_get))).await;
-    router.add_route(Route::get_state("/sync", get)).await;
+    router.add_route(Route::get("/hello", Box::new(get))).await;
     router.add_route(Route::get_static("/", "index.html")).await;
     let mut server = Server::bind(listener_ip, router).await?;
     server.add_virtual_host(localhost_vhost).await;
@@ -47,19 +47,15 @@ async fn main() -> tokio::io::Result<()> {
     return Ok(());
 }
 
-fn print_greeting(state: AppState, request: &Request) -> String {
+async fn print_greeting(state: AppState, request: Request) -> Result<String, String> {
     let views = state.views.clone();
     let mut views_write = views.write().unwrap();
     let response = format!("{} {} and {}, Viewed: {}", state.greeting, request.path(), state.bye, views_write);
     *views_write = *views_write + 1;
     drop(views_write);
-    return response;
+    return Ok(response);
 }
 
-fn async_get(_req: &Request) -> BoxedFuture<String> {
-    Box::pin(async move { "Hello From Rust Routes!".to_string() })
-}
-
-fn get(_: AppState, request: &Request) -> String {
-    "Hello From Sync Func".to_string()
+async fn get(_: AppState, _: Request) -> Result<String, String> {
+    Ok("Hello From Sync Func".to_string())
 }

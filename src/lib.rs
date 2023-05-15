@@ -9,7 +9,7 @@ pub mod virtual_host;
 
 use log;
 use response::Response;
-use routes::{Router, RequestResolver};
+use routes::Router;
 use std::{path::Path, sync::Arc};
 use tokio::{
     self,
@@ -57,9 +57,9 @@ impl Connection {
     }
 }
 
-impl<S> Server<S> 
+impl<S> Server<S>
 where
-    S: Clone + Send + Sync +'static,
+    S: Clone + Send + Sync + 'static,
 {
     pub async fn bind(ip: &str, router: Router<S>) -> Result<Self, tokio::io::Error> {
         let listener = tokio::net::TcpListener::bind(ip).await?;

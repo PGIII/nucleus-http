@@ -1,44 +1,46 @@
 use crate::{
     http::{self, Method, MimeType},
-    request::{self, Request},
+    request::Request,
     response::{IntoResponse, Response},
     state::{FromRequest, State},
     Connection,
 };
+use async_trait::async_trait;
 use std::{
     collections::HashMap,
     future::Future,
     path::{Path, PathBuf},
-    pin::Pin,
     sync::Arc,
 };
 use tokio::sync::RwLock;
 
-pub type ResolveFunction = fn(&request::Request) -> String;
-pub type BoxedFuture<T = ()> = Pin<Box<dyn Future<Output = T> + Send>>;
-pub type ResolveAsyncFunction = Box<dyn Fn(&request::Request) -> BoxedFuture<String> + Send + Sync>;
-
+#[async_trait]
 pub trait RequestResolver<S>: Send + Sync + 'static {
-    fn resolve(&self, state: State<S>, request: &Request) -> Response;
+    async fn resolve(&self, state: State<S>, request: Request) -> Response;
 }
 
-impl<F, P, R> RequestResolver<P> for F
+#[async_trait]
+impl<F, P, O, E, Fut> RequestResolver<P> for F
 where
-    R: IntoResponse,
-    F: Fn(P, &Request) -> R + Send + Sync + 'static,
-    P: FromRequest<P>,
+    O: IntoResponse,
+    E: IntoResponse,
+    Fut: Future<Output = Result<O, E>> + Send + 'static,
+    F: Fn(P, Request) -> Fut + Send + Sync + 'static,
+    P: FromRequest<P> + Send + Sync + 'static,
 {
-    fn resolve(&self, state: State<P>, request: &Request) -> Response {
-        (self)(P::from_request(state, request), request).into_response()
+    async fn resolve(&self, state: State<P>, request: Request) -> Response {
+        let result = (self)(P::from_request(state, request.clone()), request).await;
+        match result {
+            Ok(r) => r.into_response(),
+            Err(e) => e.into_response(),
+        }
     }
 }
 
 pub enum RouteResolver<S> {
     Static { file_path: String },
-    AsyncFunction(ResolveAsyncFunction),
-    Function(ResolveFunction),
     RedirectAll(String),
-    State(Arc<Box<dyn RequestResolver<S>>>),
+    Function(Arc<Box<dyn RequestResolver<S>>>),
 }
 
 pub struct Route<S> {
@@ -61,19 +63,6 @@ where
 {
     pub fn new(state: S) -> Self {
         let routes = HashMap::new();
-        Router {
-            routes: Arc::new(RwLock::new(routes)),
-            state: State(state),
-        }
-    }
-
-    pub fn new_with_route<R>(state: S, resolver: R) -> Self
-    where
-        R: RequestResolver<S> + Sync + Send + 'static + Copy + Unpin,
-    {
-        let mut routes = HashMap::new();
-        let route = Route::get_state("/", resolver);
-        routes.insert("/".to_owned(), route);
         Router {
             routes: Arc::new(RwLock::new(routes)),
             state: State(state),
@@ -122,13 +111,6 @@ where
         //serve specific route if we match
         if let Some(route) = matching_route {
             match route.resolver() {
-                RouteResolver::AsyncFunction(func) => {
-                    let func_return = func(&request).await;
-                    return Response::from(func_return);
-                }
-                RouteResolver::Function(func) => {
-                    return Self::run_sync_func(request.to_owned(), func.to_owned()).await;
-                }
                 RouteResolver::Static { file_path } => {
                     if let Some(host_dir) = Self::get_vhost_dir(request, connection).await {
                         let path = host_dir.join(file_path);
@@ -144,14 +126,11 @@ where
                     response.add_header("Location", &redirect_to);
                     return response;
                 }
-                RouteResolver::State(resolver) => {
+                RouteResolver::Function(resolver) => {
                     let resolver = resolver.clone();
-                    return Self::run_resolver(
-                        self.state.clone(),
-                        resolver,
-                        request.to_owned(),
-                    )
-                    .await;
+                    return resolver
+                        .resolve(self.state.clone(), request.to_owned())
+                        .await;
                 }
             }
         }
@@ -173,22 +152,6 @@ where
         //no route try static serve
         let response = Response::error(http::StatusCode::ErrNotFound, "File Not Found".into());
         return response;
-    }
-
-    async fn run_sync_func(request: Request, func: ResolveFunction) -> Response {
-        let blocking = tokio::task::spawn_blocking(move || {
-            let result = func(&request);
-            return result;
-        })
-        .await;
-        //FIXME: return error response intead of unwap
-        return Response::from(blocking.unwrap());
-    }
-
-    async fn run_resolver(state: State<S>, resolver: Arc<Box<dyn RequestResolver<S>>>, request: Request) -> Response 
-    {
-        let blocking = tokio::task::spawn_blocking(move || resolver.resolve(state, &request)).await;
-        return blocking.unwrap();
     }
 
     async fn get_file(path: PathBuf) -> Response {
@@ -224,8 +187,8 @@ where
     }
 }
 
-impl<S> Route<S> 
-where 
+impl<S> Route<S>
+where
     S: Clone + Send + Sync + 'static,
 {
     pub fn redirect_all(redirect_url: &str) -> Self {
@@ -237,29 +200,9 @@ where
         }
     }
 
-    pub fn get(path: &str, resolve_func: ResolveFunction) -> Self {
+    pub fn get(path: &str, func: Box<impl RequestResolver<S>>) -> Self {
         let method = Method::GET;
-        let resolver = RouteResolver::Function(resolve_func);
-        Route {
-            path: path.to_string(),
-            resolver,
-            method,
-        }
-    }
-
-    pub fn get_async(path: &str, resolve_func: ResolveAsyncFunction) -> Self {
-        let method = Method::GET;
-        let resolver = RouteResolver::AsyncFunction(resolve_func);
-        Route {
-            path: path.to_string(),
-            resolver,
-            method,
-        }
-    }
-
-    pub fn get_state(path: &str, func: impl RequestResolver<S> + 'static) -> Self {
-        let method = Method::GET;
-        let resolver = RouteResolver::State(Arc::new(Box::new(func)));
+        let resolver = RouteResolver::Function(Arc::new(func));
         Route {
             path: path.to_string(),
             resolver,

@@ -6,14 +6,14 @@ use crate::request::Request;
 pub struct State<S>(pub S);
 
 pub trait FromRequest<S> {
-    fn from_request(state: State<S>, request: &Request) -> Self;
+    fn from_request(state: State<S>, request: Request) -> Self;
 }
 
 impl<S> FromRequest<S> for S
 where
     S: Clone,
 {
-    fn from_request(state: State<S>, _request: &Request) -> Self {
+    fn from_request(state: State<S>, _request: Request) -> Self {
         let State(inner_state) = state;
         return inner_state;
     }
