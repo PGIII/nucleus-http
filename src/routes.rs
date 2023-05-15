@@ -200,9 +200,12 @@ where
         }
     }
 
-    pub fn get(path: &str, func: Box<impl RequestResolver<S>>) -> Self {
+    pub fn get<R>(path: &str, func: R) -> Self 
+    where 
+        R: RequestResolver<S>
+    {
         let method = Method::GET;
-        let resolver = RouteResolver::Function(Arc::new(func));
+        let resolver = RouteResolver::Function(Arc::new(Box::new(func)));
         Route {
             path: path.to_string(),
             resolver,

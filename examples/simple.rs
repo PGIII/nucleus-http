@@ -35,10 +35,10 @@ async fn main() -> tokio::io::Result<()> {
         views: Arc::new(RwLock::new(0))
     };
     let mut router = Router::new(state);
-    let route = Route::get("/state", Box::new(print_greeting));
+    let route = Route::get("/state", print_greeting);
     router.add_route(route).await;
     //router.add_route(Route::get_state("/req", print_req)).await;
-    router.add_route(Route::get("/hello", Box::new(get))).await;
+    router.add_route(Route::get("/hello", get)).await;
     router.add_route(Route::get_static("/", "index.html")).await;
     let mut server = Server::bind(listener_ip, router).await?;
     server.add_virtual_host(localhost_vhost).await;
