@@ -1,12 +1,12 @@
+use log;
 use nucleus_http::{
     request::Request,
-    routes::{BoxedFuture, Route},
+    routes::{Route, Router},
     virtual_host::VirtualHost,
     Server,
 };
-use tokio;
 use pretty_env_logger;
-use log;
+use tokio;
 
 #[tokio::main]
 async fn main() -> tokio::io::Result<()> {
@@ -18,29 +18,31 @@ async fn main() -> tokio::io::Result<()> {
         "0.0.0.0:7878",
         "/Users/prestongarrisoniii/dev/source/nucleus-http/",
     );
-
-    let mut server = Server::bind(listener_ip).await?;
-    server.add_virtual_host(localhost_vhost).await;
-    server
-        .add_route(Route::get_async("/async", Box::new(async_get)))
+    let mut router = Router::new(());
+    router
+        .add_route(Route::get("/async", Box::new(async_get)))
         .await;
-    server.add_route(Route::get("/sync", get)).await;
+    router.add_route(Route::get("/sync", Box::new(get))).await;
     //match on all hi/ routes
-    server.add_route(Route::get("/hi/*", dynamic_hello)).await;
-    server.add_route(Route::get_static("/", "index.html")).await;
+    router
+        .add_route(Route::get("/hi/*", Box::new(dynamic_hello)))
+        .await;
+    router.add_route(Route::get_static("/", "index.html")).await;
+    let mut server = Server::bind(listener_ip, router).await?;
+    server.add_virtual_host(localhost_vhost).await;
 
     server.serve().await.unwrap();
     return Ok(());
 }
 
-fn async_get(_req: &Request) -> BoxedFuture<String> {
-    Box::pin(async move { "Hello From Rust Routes!".to_string() })
+async fn async_get(_: (), _: Request) -> Result<String, String> {
+    Ok("Hello From Rust Routes!".to_string())
 }
 
-fn get(_req: &Request) -> String {
-    "Hello From Sync Func".to_string()
+async fn get(_: (), _: Request) -> Result<String, String> {
+    Ok("Hello From Sync Func".to_string())
 }
 
-fn dynamic_hello(req: &Request) -> String {
-    format!("Hello from URL: {}", req.path())
+async fn dynamic_hello(_: (), req: Request) -> Result<String, String> {
+    Ok(format!("Hello from URL: {}", req.path()))
 }

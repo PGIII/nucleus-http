@@ -2,7 +2,7 @@ use argh::FromArgs;
 use log;
 use nucleus_http::{
     request::Request,
-    routes::{BoxedFuture, Route, Router},
+    routes::{Route, Router},
     virtual_host::VirtualHost,
     Server,
 };
@@ -53,11 +53,12 @@ async fn main() -> tokio::io::Result<()> {
     log::info!("Listening on {listener_ip}");
     let localhost_vhost = VirtualHost::new("localhost", listener_ip, "./");
 
-    let mut router = Router::new();
+    let state = ();
+    let mut router = Router::new(state);
     router
-        .add_route(Route::get_async("/async", Box::new(async_get)))
+        .add_route(Route::get("/async", Box::new(async_get)))
         .await;
-    router.add_route(Route::get("/sync", get)).await;
+    router.add_route(Route::get("/sync", Box::new(get))).await;
     router.add_route(Route::get_static("/", "index.html")).await;
 
     let mut server = Server::bind_tls(listener_ip, &options.cert, &options.key, router).await?;
@@ -68,12 +69,12 @@ async fn main() -> tokio::io::Result<()> {
     Ok(())
 }
 
-fn async_get(_req: &Request) -> BoxedFuture<String> {
-    Box::pin(async move { "Hello From Rust Routes!".to_string() })
+async fn async_get(_: (), _: Request) -> Result<String, String> {
+    Ok("Hello From Rust Routes!".to_string())
 }
 
-fn get(_req: &Request) -> String {
-    "Hello From Sync Func".to_string()
+async fn get(_: (), _: Request) -> Result<String, String> {
+    Ok("Hello From Sync Func".to_string())
 }
 
 async fn launch_http(
@@ -83,8 +84,9 @@ async fn launch_http(
     let listener_ip = addr;
     let localhost_vhost = VirtualHost::new("localhost", &listener_ip.to_string(), "./");
     log::info!("Redirecting all on {addr} to {tls_addr}");
-    let mut router = Router::new();
-    router.add_route(Route::redirect_all(&format!("https://{tls_addr}/")))
+    let mut router = Router::new(());
+    router
+        .add_route(Route::redirect_all(&format!("https://{tls_addr}/")))
         .await;
     let mut server = Server::bind(&listener_ip.to_string(), router).await?;
     server.add_virtual_host(localhost_vhost).await;
