@@ -1,3 +1,5 @@
+use std::convert::Infallible;
+
 use crate::http::{Header, MimeType, StatusCode, Version};
 
 pub type ResponseBody = Vec<u8>;
@@ -127,6 +129,12 @@ impl From<&str> for Response {
             version: Version::V1_1,
             headers: Header::new_server(),
         }
+    }
+}
+
+impl From<Infallible> for Response {
+    fn from(_: Infallible) -> Self {
+        panic!("tried to conver from infalliable");
     }
 }
 

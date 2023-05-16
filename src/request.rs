@@ -1,4 +1,5 @@
 use core::fmt;
+use std::collections::HashMap;
 
 use crate::http::{Header, Method, Version};
 
@@ -9,7 +10,8 @@ pub struct Request {
     version: Version,
     host: String,
     query_string: Option<String>,
-    headers: Vec<Header>,
+    headers: HashMap<String, String>,
+    body: Vec<u8>,
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -19,6 +21,8 @@ pub enum Error {
     InvalidHTTPVersion,
     MissingBlankLine,
     NoHostHeader,
+    InvalidContentLength,
+    WaitingOnBody,
 }
 
 impl fmt::Display for Error {
@@ -34,6 +38,8 @@ impl From<&Error> for String {
             Error::InvalidMethod => "Invalid Method Requested".to_string(),
             Error::InvalidHTTPVersion => "Unsupported HTTP version Request".to_string(),
             Error::MissingBlankLine => "Missing Blank Line".to_string(),
+            Error::WaitingOnBody => "Waiting On Body".to_string(),
+            Error::InvalidContentLength => "Content Length Invalid".to_string()
         }
     }
 }
@@ -74,26 +80,26 @@ impl Request {
         &self.host
     }
 
+    pub fn body(&self) -> &Vec<u8> {
+        &self.body
+    }
+
     pub fn get_header_value(&self, header_name: &str) -> Option<String> {
         return Self::header_value(&self.headers, header_name);
     }
 
-    pub fn header_value(headers: &Vec<Header>, header_name: &str) -> Option<String> {
-        for header in headers {
-            if header.key == header_name {
-                return Some(header.value.to_owned());
-            }
-        }
-        return None;
+    pub fn header_value(headers: &HashMap<String, String>, header_name: &str) -> Option<String> {
+        return headers.get(header_name).cloned();
     }
 
     pub fn from_lines(lines: &Vec<String>) -> Result<Request, Error> {
         let method;
         let version;
         let path;
-        let mut headers = vec![];
+        let mut headers = HashMap::new();
         let host;
         let mut query_string = None;
+        let body = vec![];
 
         let request_seperated: Vec<&str> = lines[0].split(" ").collect(); //First line is request
         if request_seperated.len() < 3 {
@@ -128,7 +134,7 @@ impl Request {
             //FIXME: Dont we need to collect here?
             for i in 1..lines.len() {
                 if let Ok(header) = Header::try_from(&lines[i]) {
-                    headers.push(header);
+                    headers.insert(header.key, header.value);
                 }
                 //headers.push(lines[i].to_string());
             }
@@ -151,6 +157,7 @@ impl Request {
             headers,
             host,
             query_string,
+            body,
         });
     }
 
@@ -167,7 +174,24 @@ impl Request {
             return Err(Error::MissingBlankLine);
         }
         let lines_string: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
-        return Request::from_lines(&lines_string);
+        let request = Request::from_lines(&lines_string);
+        if let Ok(mut req) = request.clone() {
+            //check for content length header
+            if let Some(content_lenth) = req.get_header_value("Content-Length") {
+                if let Ok(len) = content_lenth.parse() {
+                    if blank_line_split[1].len() < len {
+                        return Err(Error::WaitingOnBody);
+                    } else {
+                        req.body.extend_from_slice(blank_line_split[1].as_bytes());
+                        return Ok(req);
+                    }
+                } else {
+                    return Err(Error::InvalidContentLength);
+                }
+            }
+        }
+
+        return request;
     }
 
     pub fn query_string(&self) -> Option<&String> {
@@ -199,10 +223,8 @@ mod tests {
             method: Method::GET,
             version: Version::V1_1,
             path: "/".to_string(),
-            headers: vec![Header {
-                key: "Host".to_string(),
-                value: "test".to_string(),
-            }],
+            body: vec![],
+            headers: HashMap::from([("Host".to_string(), "test".to_string())]),
             host: "test".to_string(),
             query_string: None,
         };
@@ -217,10 +239,8 @@ mod tests {
             method: Method::GET,
             version: Version::V1_1,
             path: "/index.html".to_string(),
-            headers: vec![Header {
-                key: "Host".to_string(),
-                value: "test".to_string(),
-            }],
+            body: vec![],
+            headers: HashMap::from([("Host".to_string(), "test".to_string())]),
             host: "test".to_string(),
             query_string: Some("test=true".to_string()),
         };
@@ -237,20 +257,12 @@ mod tests {
             method: Method::GET,
             version: Version::V1_1,
             path: "/".to_string(),
-            headers: vec![
-                Header {
-                    key: "Host".to_string(),
-                    value: "test".to_string(),
-                },
-                Header {
-                    key: "Header1".to_string(),
-                    value: "hi".to_string(),
-                },
-                Header {
-                    key: "Header2".to_string(),
-                    value: "Bye".to_string(),
-                },
-            ],
+            body: vec![],
+            headers: HashMap::from([
+                ("Host".to_string(), "test".to_string()),
+                ("Header1".to_string(), "hi".to_string()),
+                ("Header2".to_string(), "Bye".to_string()),
+            ]),
             host: "test".to_string(),
             query_string: None,
         };

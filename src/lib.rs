@@ -55,7 +55,6 @@ impl Connection {
         self.write_all(&response_buffer).await?;
         Ok(())
     }
-
 }
 
 impl<S> Server<S>
@@ -155,8 +154,9 @@ where
                                         match request_result {
                                             Ok(r) => {
                                                 let router_locked = router.read().await;
-                                                let response =
-                                                    router_locked.route(&r, connection.virtual_hosts()).await;
+                                                let response = router_locked
+                                                    .route(&r, connection.virtual_hosts())
+                                                    .await;
                                                 if let Err(error) =
                                                     connection.write_response(response).await
                                                 {
@@ -173,7 +173,8 @@ where
                                             }
                                             Err(e) => match e {
                                                 request::Error::InvalidString
-                                                | request::Error::MissingBlankLine => {
+                                                | request::Error::MissingBlankLine
+                                                | request::Error::WaitingOnBody => {
                                                     //Parital response keep reading
                                                 }
                                                 _ => {

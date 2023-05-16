@@ -6,6 +6,7 @@ use crate::{
     virtual_host::VirtualHost,
 };
 use async_trait::async_trait;
+use enum_map::{EnumMap, enum_map};
 use std::{
     collections::HashMap,
     future::Future,
@@ -49,7 +50,7 @@ pub struct Route<S> {
     resolver: RouteResolver<S>,
 }
 
-pub type Routes<R> = Arc<RwLock<HashMap<String, Route<R>>>>;
+pub type Routes<R> = Arc<RwLock<EnumMap<Method, HashMap<String, Route<R>>>>>;
 
 #[derive(Clone)]
 pub struct Router<S> {
@@ -62,16 +63,18 @@ where
     S: Clone + Send + Sync + 'static,
 {
     pub fn new(state: S) -> Self {
-        let routes = HashMap::new();
+        let map = enum_map! {
+            crate::routes::Method::GET | crate::routes::Method::POST => HashMap::new(),
+        };
         Router {
-            routes: Arc::new(RwLock::new(routes)),
+            routes: Arc::new(RwLock::new(map)),
             state: State(state),
         }
     }
 
     pub async fn add_route(&mut self, route: Route<S>) {
         let mut routes_locked = self.routes.write().await;
-        routes_locked.insert(route.path.clone(), route);
+        routes_locked[*route.method()].insert(route.path.clone(), route);
     }
 
     pub fn routes(&self) -> Routes<S> {
@@ -79,23 +82,18 @@ where
     }
 
     pub fn new_routes() -> Routes<S> {
-        Arc::new(RwLock::new(HashMap::new()))
+        let map = enum_map! {
+            crate::routes::Method::GET | crate::routes::Method::POST => HashMap::new(),
+        };
+        Arc::new(RwLock::new(map))
     }
 
-    pub async fn route(
-        &self,
-        request: &Request,
-        vhosts: Arc<RwLock<Vec<VirtualHost>>>,
-    ) -> Response {
+    pub async fn route(&self, request: &Request, vhosts: Arc<RwLock<Vec<VirtualHost>>>) -> Response {
         log::info!("{} Request for: {}", request.method(), request.path());
         let routes = self.routes();
-        let routes_locked = routes.read().await;
+        let routes_locked = &routes.read().await[*request.method()];
         let mut matching_route = None;
 
-        for route_hash in &*routes_locked {
-            let (key, route) = route_hash;
-            log::debug!("Path: {}, Route: {}", key, route.path());
-        }
         //look for route mathcing requested URL
         if let Some(route) = routes_locked.get(request.path()) {
             //found exact route match
@@ -192,10 +190,7 @@ where
             },
         }
     }
-    async fn get_vhost_dir(
-        request: &Request,
-        vhosts: Arc<RwLock<Vec<VirtualHost>>>,
-    ) -> Option<PathBuf> {
+    async fn get_vhost_dir(request: &Request, vhosts: Arc<RwLock<Vec<VirtualHost>>>) -> Option<PathBuf> {
         for vhost in &*vhosts.read().await {
             if vhost.hostname() == request.hostname() {
                 return Some(vhost.root_dir().to_path_buf());
@@ -223,6 +218,19 @@ where
         R: RequestResolver<S>,
     {
         let method = Method::GET;
+        let resolver = RouteResolver::Function(Arc::new(Box::new(func)));
+        Route {
+            path: path.to_string(),
+            resolver,
+            method,
+        }
+    }
+
+    pub fn post<R>(path: &str, func: R) -> Self
+    where
+        R: RequestResolver<S>,
+    {
+        let method = Method::POST;
         let resolver = RouteResolver::Function(Arc::new(Box::new(func)));
         Route {
             path: path.to_string(),
@@ -287,22 +295,61 @@ mod tests {
     #[tokio::test]
     async fn route_static_file() {
         let request =
-            Request::from_string("GET /index.html HTTP/1.1\r\nHost: localhost\r\n\r\n".to_owned())
-                .unwrap();
+            Request::from_string("GET /index.html HTTP/1.1\r\nHost: localhost\r\n\r\n".to_owned()).unwrap();
         let vhost = VirtualHost::new("localhost", "", "./");
-        let vhosts = Arc::new(RwLock::new(vec![vhost]));
+        let vhosts = Arc::new(RwLock::new(vec![vhost])); 
         let mut router = Router::new(());
         router.add_route(Route::get_static("/", "index.html")).await;
-
+        
         let file = tokio::fs::read_to_string("./index.html").await.unwrap();
         let expected = Response::from(file);
-        assert_eq!(http::StatusCode::OK, expected.status());
+        assert_eq!(http::StatusCode::OK, expected.status()); 
 
         let response = router.route(&request, vhosts.clone()).await;
         assert_eq!(expected, response);
-
+        
         let request =
             Request::from_string("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".to_owned()).unwrap();
+        let response = router.route(&request, vhosts.clone()).await;
+        assert_eq!(expected, response);
+    }
+    
+    async fn hello(_: (), _: Request) -> Result<String, String> {
+        Ok("hello".to_owned())
+    }
+
+    #[tokio::test]
+    async fn route_basic() {
+        let request =
+            Request::from_string("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".to_owned()).unwrap();
+        let vhost = VirtualHost::new("localhost", "", "./");
+        let vhosts = Arc::new(RwLock::new(vec![vhost])); 
+        let mut router = Router::new(());
+        router.add_route(Route::get("/", hello)).await;
+        
+        let expected = Response::from("hello");
+        assert_eq!(http::StatusCode::OK, expected.status()); 
+
+        let response = router.route(&request, vhosts.clone()).await;
+        assert_eq!(expected, response);
+    }
+
+    async fn dynamic(_: (), req: Request) -> Result<String, String> {
+        Ok(format!("Hello {}", req.path()))
+    }
+
+    #[tokio::test]
+    async fn route_dynamic() {
+        let vhost = VirtualHost::new("localhost", "", "./");
+        let vhosts = Arc::new(RwLock::new(vec![vhost])); 
+        let mut router = Router::new(());
+        router.add_route(Route::get("/*", dynamic)).await;
+        
+        let expected = Response::from("Hello /bob");
+        assert_eq!(http::StatusCode::OK, expected.status()); 
+
+        let request =
+        Request::from_string("GET /bob HTTP/1.1\r\nHost: localhost\r\n\r\n".to_owned()).unwrap();
         let response = router.route(&request, vhosts.clone()).await;
         assert_eq!(expected, response);
     }

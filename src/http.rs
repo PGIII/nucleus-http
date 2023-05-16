@@ -1,7 +1,8 @@
 use core::fmt;
+use enum_map::Enum;
 use std::path::PathBuf;
 
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(PartialEq, Debug, Clone, Copy, Enum)]
 pub enum Method {
     GET,
     POST,
@@ -20,6 +21,7 @@ pub enum StatusCode {
     Continue = 100,
     OK = 200,
     MovedPermanetly = 301,
+    Found = 302,
     ErrBadRequest = 400,
     ErrUnathorized = 401,
     ErrForbidden = 403,
@@ -197,10 +199,12 @@ impl From<StatusCode> for &str {
             StatusCode::Continue => "100 Continue",
             StatusCode::OK => "200 OK",
             StatusCode::MovedPermanetly => "301 Moved Permantely",
+            StatusCode::Found => "302 Found",
             StatusCode::ErrUnathorized => "401 Unathorized",
             StatusCode::ErrForbidden => "403 Forbidden",
             StatusCode::ErrNotFound => "404 Not Found",
-            _ => "500 Internal Server Error",
+            StatusCode::ErrBadRequest => "400 Bad Request",
+            StatusCode::ErrInternalServer => "500 Internal Server Error",
         }
     }
 }
