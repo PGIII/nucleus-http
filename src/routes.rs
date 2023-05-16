@@ -3,7 +3,7 @@ use crate::{
     request::Request,
     response::{IntoResponse, Response},
     state::{FromRequest, State},
-    Connection,
+    virtual_host::VirtualHost,
 };
 use async_trait::async_trait;
 use std::{
@@ -82,20 +82,30 @@ where
         Arc::new(RwLock::new(HashMap::new()))
     }
 
-    pub async fn route(&self, request: &Request, connection: &Connection) -> Response {
+    pub async fn route(
+        &self,
+        request: &Request,
+        vhosts: Arc<RwLock<Vec<VirtualHost>>>,
+    ) -> Response {
         log::info!("{} Request for: {}", request.method(), request.path());
         let routes = self.routes();
         let routes_locked = routes.read().await;
         let mut matching_route = None;
 
+        for route_hash in &*routes_locked {
+            let (key, route) = route_hash;
+            log::debug!("Path: {}, Route: {}", key, route.path());
+        }
         //look for route mathcing requested URL
         if let Some(route) = routes_locked.get(request.path()) {
             //found exact route match
             matching_route = Some(route);
         } else {
+            log::debug!("Checking Glob Routes");
             // go through ancestors appending * on the end and see if we have any matches
             let path = Path::new(request.path());
             if let Some(parent) = path.parent() {
+                log::debug!("Parent {}", parent.to_string_lossy());
                 let mut ancestors = parent.ancestors();
                 while let Some(a) = ancestors.next() {
                     log::debug!("checking ancestor: {}", a.to_string_lossy());
@@ -105,6 +115,11 @@ where
                         }
                     }
                 }
+            } else {
+                //no parent so its root, check for catch all bare *
+                if let Some(route) = routes_locked.get("*") {
+                    matching_route = Some(route);
+                }
             }
         }
 
@@ -112,7 +127,7 @@ where
         if let Some(route) = matching_route {
             match route.resolver() {
                 RouteResolver::Static { file_path } => {
-                    if let Some(host_dir) = Self::get_vhost_dir(request, connection).await {
+                    if let Some(host_dir) = Self::get_vhost_dir(request, vhosts.clone()).await {
                         let path = host_dir.join(file_path);
                         return Self::get_file(path).await;
                     }
@@ -136,7 +151,7 @@ where
         }
 
         //server static files based on vhost
-        if let Some(host_dir) = Self::get_vhost_dir(request, connection).await {
+        if let Some(host_dir) = Self::get_vhost_dir(request, vhosts).await {
             let mut file_path = PathBuf::from(request.path());
             if file_path.is_absolute() {
                 if let Ok(path) = file_path.strip_prefix("/") {
@@ -177,8 +192,11 @@ where
             },
         }
     }
-    async fn get_vhost_dir(request: &Request, connection: &Connection) -> Option<PathBuf> {
-        for vhost in &*connection.virtual_hosts().read().await {
+    async fn get_vhost_dir(
+        request: &Request,
+        vhosts: Arc<RwLock<Vec<VirtualHost>>>,
+    ) -> Option<PathBuf> {
+        for vhost in &*vhosts.read().await {
             if vhost.hostname() == request.hostname() {
                 return Some(vhost.root_dir().to_path_buf());
             }
@@ -200,9 +218,9 @@ where
         }
     }
 
-    pub fn get<R>(path: &str, func: R) -> Self 
-    where 
-        R: RequestResolver<S>
+    pub fn get<R>(path: &str, func: R) -> Self
+    where
+        R: RequestResolver<S>,
     {
         let method = Method::GET;
         let resolver = RouteResolver::Function(Arc::new(Box::new(func)));
@@ -257,5 +275,35 @@ where
         let path_match = request_path == route_path || route_path == "*";
 
         return path_match;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::virtual_host::VirtualHost;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn route_static_file() {
+        let request =
+            Request::from_string("GET /index.html HTTP/1.1\r\nHost: localhost\r\n\r\n".to_owned())
+                .unwrap();
+        let vhost = VirtualHost::new("localhost", "", "./");
+        let vhosts = Arc::new(RwLock::new(vec![vhost]));
+        let mut router = Router::new(());
+        router.add_route(Route::get_static("/", "index.html")).await;
+
+        let file = tokio::fs::read_to_string("./index.html").await.unwrap();
+        let expected = Response::from(file);
+        assert_eq!(http::StatusCode::OK, expected.status());
+
+        let response = router.route(&request, vhosts.clone()).await;
+        assert_eq!(expected, response);
+
+        let request =
+            Request::from_string("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".to_owned()).unwrap();
+        let response = router.route(&request, vhosts.clone()).await;
+        assert_eq!(expected, response);
     }
 }

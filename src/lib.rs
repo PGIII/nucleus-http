@@ -55,6 +55,7 @@ impl Connection {
         self.write_all(&response_buffer).await?;
         Ok(())
     }
+
 }
 
 impl<S> Server<S>
@@ -155,7 +156,7 @@ where
                                             Ok(r) => {
                                                 let router_locked = router.read().await;
                                                 let response =
-                                                    router_locked.route(&r, &connection).await;
+                                                    router_locked.route(&r, connection.virtual_hosts()).await;
                                                 if let Err(error) =
                                                     connection.write_response(response).await
                                                 {

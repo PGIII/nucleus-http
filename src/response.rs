@@ -1,6 +1,8 @@
 use crate::http::{Header, MimeType, StatusCode, Version};
 
 pub type ResponseBody = Vec<u8>;
+
+#[derive(Debug, PartialEq)]
 pub struct Response {
     version: Version,
     status: StatusCode,
@@ -81,6 +83,14 @@ impl Response {
     pub fn add_header(&mut self, key: &str, value: &str) {
         let header = Header::new(key, value);
         self.headers.push(header);
+    }
+
+    pub fn version(&self) -> Version {
+        self.version
+    }
+
+    pub fn status(&self) -> StatusCode {
+        self.status
     }
 }
 
