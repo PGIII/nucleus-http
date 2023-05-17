@@ -99,14 +99,11 @@ where
             //found exact route match
             matching_route = Some(route);
         } else {
-            log::debug!("Checking Glob Routes");
             // go through ancestors appending * on the end and see if we have any matches
             let path = Path::new(request.path());
             if let Some(parent) = path.parent() {
-                log::debug!("Parent {}", parent.to_string_lossy());
                 let mut ancestors = parent.ancestors();
                 while let Some(a) = ancestors.next() {
-                    log::debug!("checking ancestor: {}", a.to_string_lossy());
                     if let Some(globed) = a.join("*").to_str() {
                         if let Some(route) = routes_locked.get(globed) {
                             matching_route = Some(route);

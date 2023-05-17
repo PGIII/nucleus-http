@@ -100,6 +100,5 @@ async fn post(state: AppState, req: Request) -> Result<Response, Infallible> {
         }
     }
     res.add_header("Location", "http://localhost:7878/success");
-    dbg!(&res);
     Ok(res)
 }
