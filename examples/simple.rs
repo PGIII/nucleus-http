@@ -10,6 +10,7 @@ use nucleus_http::{
 use tokio;
 use pretty_env_logger;
 use log;
+use anyhow;
 
 #[derive(Debug, Clone)]
 struct AppState {
@@ -57,6 +58,6 @@ async fn print_greeting(state: AppState, request: Request) -> Result<String, Str
     return Ok(response);
 }
 
-async fn get(_: AppState, _: Request) -> Result<String, String> {
+async fn get(_: AppState, _: Request) -> Result<String, anyhow::Error> {
     Ok("Hello From Sync Func".to_string())
 }

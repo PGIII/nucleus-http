@@ -1,6 +1,7 @@
 use std::convert::Infallible;
 
 use crate::http::{Header, MimeType, StatusCode, Version};
+use anyhow;
 
 pub type ResponseBody = Vec<u8>;
 
@@ -131,6 +132,20 @@ impl From<&str> for Response {
         }
     }
 }
+
+impl From<anyhow::Error> for Response {
+    fn from(value: anyhow::Error) -> Self {
+       let message = format!("<h1>Error 500 Internal Server Error</h1>\r\n<h2>{}</h2>", value); 
+        Response {
+            status: StatusCode::ErrInternalServer, //FIXME: make this smarter
+            body: message.into(),
+            mime: MimeType::HTML,
+            version: Version::V1_1,
+            headers: Header::new_server(),
+        }
+    }
+}
+
 
 impl From<Infallible> for Response {
     fn from(_: Infallible) -> Self {
