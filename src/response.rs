@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 
-use crate::http::{Header, MimeType, StatusCode, Version};
+use crate::http::{Header, MimeType, StatusCode, Version, IntoHeader};
 use anyhow;
 
 pub type ResponseBody = Vec<u8>;
@@ -83,8 +83,8 @@ impl Response {
         return buffer;
     }
 
-    pub fn add_header(&mut self, key: &str, value: &str) {
-        let header = Header::new(key, value);
+    pub fn add_header(&mut self, value: impl IntoHeader) {
+        let header = value.into_header();
         self.headers.push(header);
     }
 

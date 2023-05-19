@@ -53,6 +53,30 @@ pub struct Header {
     pub value: String,
 }
 
+pub trait IntoHeader {
+    fn into_header(&self) -> Header;
+}
+
+impl IntoHeader for Header {
+    fn into_header(&self) -> Header {
+        return self.clone();
+    }
+}
+
+impl IntoHeader for (&str, &str) {
+    fn into_header(&self) -> Header {
+        let (key, value) = self;
+        return Header::new(key, value);
+    }
+}
+
+impl IntoHeader for (&str, &String) {
+    fn into_header(&self) -> Header {
+        let (key, value) = self;
+        return Header::new(key, value);
+    }
+}
+
 impl fmt::Display for Method {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

@@ -99,6 +99,6 @@ async fn post(state: AppState, req: Request) -> Result<Response, Infallible> {
             *name_locked = split[1].to_string();
         }
     }
-    res.add_header("Location", "/success");
+    res.add_header(("Location", "/success"));
     Ok(res)
 }

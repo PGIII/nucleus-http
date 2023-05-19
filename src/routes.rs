@@ -133,7 +133,7 @@ where
                         vec![],
                         MimeType::PlainText,
                     );
-                    response.add_header("Location", &redirect_to);
+                    response.add_header(("Location", redirect_to));
                     return response;
                 }
                 RouteResolver::Function(resolver) => {
