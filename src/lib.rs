@@ -7,6 +7,7 @@ pub mod state;
 pub mod thread_pool;
 pub mod virtual_host;
 pub mod cookies;
+pub mod utils;
 
 use log;
 use response::Response;

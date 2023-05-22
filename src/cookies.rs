@@ -1,4 +1,13 @@
-use crate::http::{Header, IntoHeader};
+use crate::{
+    http::{Header, IntoHeader},
+    utils::{self, base64_decode, base64_encode},
+};
+use anyhow::Context;
+use hmac::{digest::MacError, Hmac, Mac};
+use secrecy::{ExposeSecret, SecretString};
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+use std::format;
 
 #[derive(Debug, Clone)]
 pub struct CookieConfig {
@@ -8,20 +17,40 @@ pub struct CookieConfig {
     domain: Option<String>,
     path: Option<String>,
     expiration: Option<String>, //datetime string
+    secret: SecretString,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct Cookie {
     config: CookieConfig,
     name: String,
     value: String,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CookiePayload {
+    value: String,
+    signature: Vec<u8>,
+}
+
+type HmacSha256 = Hmac<Sha256>;
+
+impl PartialEq for CookieConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.secure == other.secure
+            && self.http_only == other.http_only
+            && self.same_site == other.same_site
+            && self.domain == other.domain
+            && self.path == other.path
+            && self.expiration == other.expiration
+            && self.secret.expose_secret() == other.secret.expose_secret()
+    }
+}
+
+impl Eq for CookieConfig {}
+
 /// http cookie, can be converted into a header
 impl Cookie {
-    pub fn new(name: &str, value: &str) -> Cookie {
-        Self::new_with_config(&CookieConfig::default(), name, value)
-    }
-
     pub fn new_with_config(config: &CookieConfig, name: &str, value: &str) -> Cookie {
         Cookie {
             config: config.clone(),
@@ -32,6 +61,18 @@ impl Cookie {
 
     pub fn delete(&mut self) {
         self.config.expiration = Some("Thu, 01 Jan 1970 00:00:00 GMT".into())
+    }
+
+    /// Signs value of cookie and returns struct containing value and signature
+    pub fn sign(&self) -> CookiePayload {
+        let mut mac =
+            HmacSha256::new_from_slice(self.config.secret.expose_secret().as_bytes()).unwrap();
+        mac.update(self.value.as_bytes());
+        let sig = mac.finalize().into_bytes().to_vec();
+        CookiePayload {
+            value: self.value.to_string(),
+            signature: sig,
+        }
     }
 }
 
@@ -48,11 +89,101 @@ impl CookieConfig {
             domain: None,
             path: Some("/".into()),
             expiration: None,
+            secret: utils::generate_random_secret(),
         }
     }
 
     pub fn new_cookie(&self, name: &str, value: &str) -> Cookie {
         Cookie::new_with_config(self, name, value)
+    }
+
+    pub fn is_valid_signature(&self, payload: &CookiePayload) -> Result<(), MacError> {
+        let mut mac = HmacSha256::new_from_slice(self.secret.expose_secret().as_bytes()).unwrap();
+        mac.update(payload.value.as_bytes());
+        mac.verify_slice(&payload.signature)
+    }
+
+    pub fn cookie_from_str(&self, value: &str) -> Result<Cookie, anyhow::Error> {
+        let values: Vec<_> = value.split("; ").collect();
+        let mut iterator = values.into_iter();
+        let mut secure = false;
+        let mut http_only = false;
+        let mut same_site = None;
+        let mut domain = None;
+        let mut path = None;
+        let mut expiration = None;
+
+        if let Some(first) = iterator.next() {
+            // first key value split is the cookies key and value
+            let first_split: Vec<_> = first.split("=").collect();
+            let name = first_split[0];
+            let value = first_split[1];
+            while let Some(item) = iterator.next() {
+                let split: Vec<_> = item.split("=").collect();
+                let n = split[0];
+                match n {
+                    "Secure" => {
+                        secure = true;
+                    }
+                    "HttpOnly" => {
+                        http_only = true;
+                    }
+                    "SameSite" => {
+                        if split.len() > 1 {
+                            same_site = Some(split[1].to_string());
+                        }
+                    }
+                    "Domain" => {
+                        if split.len() > 1 {
+                            domain = Some(split[1].to_string());
+                        }
+                    }
+                    "Path" => {
+                        if split.len() > 1 {
+                            path = Some(split[1].to_string());
+                        }
+                    }
+                    "Expires" => {
+                        if split.len() > 1 {
+                            expiration = Some(split[1].to_string());
+                        }
+                    }
+                    _ => {
+                        continue;
+                    }
+                }
+            }
+            let config = CookieConfig {
+                secure,
+                http_only,
+                same_site,
+                domain,
+                path,
+                expiration,
+                secret: self.secret.clone(),
+            };
+            let encoded_value = value.to_string();
+            let decoded_value = base64_decode(encoded_value).context("Str to cookie")?;
+            let json_string = String::from_utf8(decoded_value)?;
+            let cookie_payload: CookiePayload = serde_json::from_str(&json_string)?;
+            if self.is_valid_signature(&cookie_payload).is_ok() {
+                let cookie = config.new_cookie(name, &cookie_payload.value);
+                Ok(cookie)
+            } else {
+                Err(anyhow::Error::msg("Invalid Signature"))
+            }
+
+        } else {
+            Err(anyhow::Error::msg("Cookie Value missing"))
+        }
+    }
+
+    pub fn cookie_from_header(&self, header: Header) -> Result<Cookie, anyhow::Error> {
+        if header.key == "set-cookie" {
+            self.cookie_from_str(&header.value)
+        } else {
+            Err(anyhow::Error::msg("Invalid Header Name For Cookie"))
+        }
     }
 
     pub fn secure(&self) -> bool {
@@ -106,7 +237,12 @@ impl CookieConfig {
 
 impl IntoHeader for Cookie {
     fn into_header(&self) -> crate::http::Header {
-        let mut header_value = format!("{}={}", self.name, self.value);
+        let cookie_value = self.sign();
+        let cookie_json = serde_json::to_string(&cookie_value).unwrap(); //FIXME: How should we
+                                                                         //handle an error here ?
+        let cookie_base64 = base64_encode(cookie_json.into());
+        let mut header_value = format!("{}={}", self.name, cookie_base64);
+
         if self.config.secure {
             header_value = format!("{}; Secure", header_value);
         }
@@ -141,36 +277,34 @@ mod tests {
 
     #[test]
     fn set_cookie_header() {
-        let expected = "set-cookie: id=hi; Secure; HttpOnly; SameSite=Strict; Path=/";
-        let cookie = Cookie::new("id", "hi");
+        //let expected = "set-cookie: id=hi; Secure; HttpOnly; SameSite=Strict; Path=/";
+        let config = CookieConfig::default();
+        let cookie = config.new_cookie("id", "hi");
         let header = cookie.into_header();
-        let header_string = String::from(header);
-        assert_eq!(expected, header_string);
+        let decoded_coookie = config.cookie_from_header(header).unwrap();
+        assert_eq!(cookie, decoded_coookie);
     }
 
     #[test]
     fn cookie_builder() {
         let config = CookieConfig::default();
-        let expected = "set-cookie: id=hi; Secure; HttpOnly; SameSite=Strict; Path=/";
         let cookie = config.new_cookie("id", "hi");
         let header = cookie.into_header();
-        let header_string = String::from(header);
-        assert_eq!(expected, header_string);
+        let decoded_cookie = config.cookie_from_header(header).unwrap();
+        assert_eq!(cookie, decoded_cookie);
     }
 
     #[test]
     fn cookie_delete() {
         let config = CookieConfig::default();
-        let expected = "set-cookie: id=hi; Secure; HttpOnly; SameSite=Strict; Path=/";
         let mut cookie = config.new_cookie("id", "hi");
         let header = cookie.into_header();
-        let header_string = String::from(header);
-        assert_eq!(expected, header_string);
+        let decoded_cookie = config.cookie_from_header(header).unwrap();
+        assert_eq!(cookie, decoded_cookie);
 
-        let expected =  "set-cookie: id=hi; Secure; HttpOnly; SameSite=Strict; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
         cookie.delete();
         let header = cookie.into_header();
-        let header_string = String::from(header);
-        assert_eq!(expected, header_string);
+        let decoded_cookie = config.cookie_from_header(header).unwrap();
+        assert_eq!(cookie, decoded_cookie);
     }
 }
