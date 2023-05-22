@@ -1,4 +1,4 @@
-use crate::http::{IntoHeader, Header};
+use crate::http::{Header, IntoHeader};
 
 #[derive(Debug, Clone)]
 pub struct CookieConfig {
@@ -7,7 +7,7 @@ pub struct CookieConfig {
     same_site: Option<String>,
     domain: Option<String>,
     path: Option<String>,
-    expiration: Option<String>,//datetime string
+    expiration: Option<String>, //datetime string
 }
 
 pub struct Cookie {
@@ -31,7 +31,7 @@ impl Cookie {
     }
 
     pub fn delete(&mut self) {
-       self.config.expiration = Some("Thu, 01 Jan 1970 00:00:00 GMT".into()) 
+        self.config.expiration = Some("Thu, 01 Jan 1970 00:00:00 GMT".into())
     }
 }
 
@@ -52,7 +52,7 @@ impl CookieConfig {
     }
 
     pub fn new_cookie(&self, name: &str, value: &str) -> Cookie {
-       Cookie::new_with_config(self, name, value) 
+        Cookie::new_with_config(self, name, value)
     }
 
     pub fn secure(&self) -> bool {
@@ -106,7 +106,7 @@ impl CookieConfig {
 
 impl IntoHeader for Cookie {
     fn into_header(&self) -> crate::http::Header {
-        let mut header_value = format!("{}={}", self.name, self.value); 
+        let mut header_value = format!("{}={}", self.name, self.value);
         if self.config.secure {
             header_value = format!("{}; Secure", header_value);
         }
@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn set_cookie_header() {
-        let expected = "Set-Cookie: id=hi; Secure; HttpOnly; SameSite=Strict; Path=/";
+        let expected = "set-cookie: id=hi; Secure; HttpOnly; SameSite=Strict; Path=/";
         let cookie = Cookie::new("id", "hi");
         let header = cookie.into_header();
         let header_string = String::from(header);
@@ -151,7 +151,7 @@ mod tests {
     #[test]
     fn cookie_builder() {
         let config = CookieConfig::default();
-        let expected = "Set-Cookie: id=hi; Secure; HttpOnly; SameSite=Strict; Path=/";
+        let expected = "set-cookie: id=hi; Secure; HttpOnly; SameSite=Strict; Path=/";
         let cookie = config.new_cookie("id", "hi");
         let header = cookie.into_header();
         let header_string = String::from(header);
@@ -161,13 +161,13 @@ mod tests {
     #[test]
     fn cookie_delete() {
         let config = CookieConfig::default();
-        let expected = "Set-Cookie: id=hi; Secure; HttpOnly; SameSite=Strict; Path=/";
+        let expected = "set-cookie: id=hi; Secure; HttpOnly; SameSite=Strict; Path=/";
         let mut cookie = config.new_cookie("id", "hi");
         let header = cookie.into_header();
         let header_string = String::from(header);
         assert_eq!(expected, header_string);
 
-        let expected =  "Set-Cookie: id=hi; Secure; HttpOnly; SameSite=Strict; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT";  
+        let expected =  "set-cookie: id=hi; Secure; HttpOnly; SameSite=Strict; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
         cookie.delete();
         let header = cookie.into_header();
         let header_string = String::from(header);

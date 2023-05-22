@@ -181,6 +181,7 @@ where
                                                 _ => {
                                                     let error_res =
                                                         format!("400 bad request: {}", e);
+                                                    log::debug!("{}", error_res);
                                                     let response = Response::error(
                                                         http::StatusCode::ErrBadRequest,
                                                         error_res.into(),

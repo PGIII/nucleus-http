@@ -164,7 +164,7 @@ impl TryFrom<String> for Header {
     fn try_from(string: String) -> Result<Self, Self::Error> {
         let split: Vec<&str> = string.split(": ").collect();
         if split.len() == 2 {
-            let key = split[0].to_string();
+            let key = split[0].to_lowercase();
             let value = split[1].to_string();
             return Ok(Self { key, value });
         } else if split.len() > 2 {
@@ -180,7 +180,7 @@ impl TryFrom<&String> for Header {
     fn try_from(string: &String) -> Result<Self, Self::Error> {
         let split: Vec<&str> = string.split(": ").collect();
         if split.len() == 2 {
-            let key = split[0].to_string();
+            let key = split[0].to_lowercase();
             let value = split[1].to_string();
             return Ok(Self { key, value });
         } else if split.len() > 2 {
@@ -206,7 +206,7 @@ impl From<Header> for String {
 impl Header {
     pub fn new(key: &str, value: &str) -> Header {
         Header {
-            key: key.to_string(),
+            key: key.to_lowercase(),
             value: value.to_string(),
         }
     }

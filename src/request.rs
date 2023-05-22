@@ -85,11 +85,13 @@ impl Request {
     }
 
     pub fn get_header_value(&self, header_name: &str) -> Option<String> {
+        let lower = header_name.to_lowercase();
         return Self::header_value(&self.headers, header_name);
     }
 
     pub fn header_value(headers: &HashMap<String, String>, header_name: &str) -> Option<String> {
-        return headers.get(header_name).cloned();
+        let lower = header_name.to_lowercase();
+        return headers.get(&lower).cloned();
     }
 
     pub fn from_lines(lines: &Vec<String>) -> Result<Request, Error> {
@@ -224,7 +226,7 @@ mod tests {
             version: Version::V1_1,
             path: "/".to_string(),
             body: vec![],
-            headers: HashMap::from([("Host".to_string(), "test".to_string())]),
+            headers: HashMap::from([("host".to_string(), "test".to_string())]),
             host: "test".to_string(),
             query_string: None,
         };
@@ -240,7 +242,7 @@ mod tests {
             version: Version::V1_1,
             path: "/index.html".to_string(),
             body: vec![],
-            headers: HashMap::from([("Host".to_string(), "test".to_string())]),
+            headers: HashMap::from([("host".to_string(), "test".to_string())]),
             host: "test".to_string(),
             query_string: Some("test=true".to_string()),
         };
@@ -259,15 +261,15 @@ mod tests {
             path: "/".to_string(),
             body: vec![],
             headers: HashMap::from([
-                ("Host".to_string(), "test".to_string()),
-                ("Header1".to_string(), "hi".to_string()),
-                ("Header2".to_string(), "Bye".to_string()),
+                ("host".to_string(), "test".to_string()),
+                ("header1".to_string(), "hi".to_string()),
+                ("header2".to_string(), "Bye".to_string()),
             ]),
             host: "test".to_string(),
             query_string: None,
         };
         let request = Request::from_string(
-            "GET / HTTP/1.1\r\nHost: test\r\nHeader1: hi\r\nHeader2: Bye\r\n\r\n".to_owned(),
+            "GET / HTTP/1.1\r\nhost: test\r\nheader1: hi\r\nheader2: Bye\r\n\r\n".to_owned(),
         )
         .expect("Error Parsing");
         assert_eq!(expected, request);
