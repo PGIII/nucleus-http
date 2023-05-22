@@ -86,7 +86,7 @@ impl Request {
 
     pub fn get_header_value(&self, header_name: &str) -> Option<String> {
         let lower = header_name.to_lowercase();
-        return Self::header_value(&self.headers, header_name);
+        return Self::header_value(&self.headers, &lower);
     }
 
     pub fn header_value(headers: &HashMap<String, String>, header_name: &str) -> Option<String> {

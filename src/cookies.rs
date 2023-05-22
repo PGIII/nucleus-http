@@ -7,7 +7,7 @@ use hmac::{digest::MacError, Hmac, Mac};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use std::format;
+use std::{collections::HashMap, format, vec};
 
 #[derive(Debug, Clone)]
 pub struct CookieConfig {
@@ -74,9 +74,18 @@ impl Cookie {
             signature: sig,
         }
     }
+
+    pub fn value(&self) -> &str {
+        self.value.as_str()
+    }
+
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
 }
 
 /// Settings for Cookie, cookies can be built from this
+/// a cookie config will also generate a random key for signing
 impl CookieConfig {
     /// Default settings for cookie
     /// defaults are Strict same site, secure, http only, path = /, and no expiration
@@ -103,7 +112,7 @@ impl CookieConfig {
         mac.verify_slice(&payload.signature)
     }
 
-    pub fn cookie_from_str(&self, value: &str) -> Result<Cookie, anyhow::Error> {
+    pub fn cookies_from_str(&self, value: &str) -> Result<HashMap<String, Cookie>, anyhow::Error> {
         let values: Vec<_> = value.split("; ").collect();
         let mut iterator = values.into_iter();
         let mut secure = false;
@@ -112,75 +121,73 @@ impl CookieConfig {
         let mut domain = None;
         let mut path = None;
         let mut expiration = None;
+        let mut map = HashMap::new();
+        let mut raw_cookie_list = vec![];
 
-        if let Some(first) = iterator.next() {
-            // first key value split is the cookies key and value
-            let first_split: Vec<_> = first.split("=").collect();
-            let name = first_split[0];
-            let value = first_split[1];
-            while let Some(item) = iterator.next() {
-                let split: Vec<_> = item.split("=").collect();
-                let n = split[0];
-                match n {
-                    "Secure" => {
-                        secure = true;
-                    }
-                    "HttpOnly" => {
-                        http_only = true;
-                    }
-                    "SameSite" => {
-                        if split.len() > 1 {
-                            same_site = Some(split[1].to_string());
-                        }
-                    }
-                    "Domain" => {
-                        if split.len() > 1 {
-                            domain = Some(split[1].to_string());
-                        }
-                    }
-                    "Path" => {
-                        if split.len() > 1 {
-                            path = Some(split[1].to_string());
-                        }
-                    }
-                    "Expires" => {
-                        if split.len() > 1 {
-                            expiration = Some(split[1].to_string());
-                        }
-                    }
-                    _ => {
-                        continue;
+        while let Some(item) = iterator.next() {
+            let split: Vec<_> = item.split("=").collect();
+            let n = split[0];
+            match n {
+                "Secure" => {
+                    secure = true;
+                }
+                "HttpOnly" => {
+                    http_only = true;
+                }
+                "SameSite" => {
+                    if split.len() > 1 {
+                        same_site = Some(split[1].to_string());
                     }
                 }
+                "Domain" => {
+                    if split.len() > 1 {
+                        domain = Some(split[1].to_string());
+                    }
+                }
+                "Path" => {
+                    if split.len() > 1 {
+                        path = Some(split[1].to_string());
+                    }
+                }
+                "Expires" => {
+                    if split.len() > 1 {
+                        expiration = Some(split[1].to_string());
+                    }
+                }
+                _ => {
+                    raw_cookie_list.push((n.to_string(), split[1].to_string()));
+                }
             }
-            let config = CookieConfig {
-                secure,
-                http_only,
-                same_site,
-                domain,
-                path,
-                expiration,
-                secret: self.secret.clone(),
-            };
-            let encoded_value = value.to_string();
-            let decoded_value = base64_decode(encoded_value).context("Str to cookie")?;
-            let json_string = String::from_utf8(decoded_value)?;
+        }
+
+        let config = CookieConfig {
+            secure,
+            http_only,
+            same_site,
+            domain,
+            path,
+            expiration,
+            secret: self.secret.clone(),
+        };
+        for (n, v) in raw_cookie_list {
+            let encoded_value = v;
+            let decoded_value = base64_decode(encoded_value).context("Error Decoding base64 from cookie")?;
+            let json_string = String::from_utf8(decoded_value).context("Error converting cookie value to string")?;
             let cookie_payload: CookiePayload = serde_json::from_str(&json_string)?;
             if self.is_valid_signature(&cookie_payload).is_ok() {
-                let cookie = config.new_cookie(name, &cookie_payload.value);
-                Ok(cookie)
-            } else {
-                Err(anyhow::Error::msg("Invalid Signature"))
+                let cookie = config.new_cookie(&n, &cookie_payload.value);
+                map.insert(n, cookie);
             }
-
-        } else {
-            Err(anyhow::Error::msg("Cookie Value missing"))
         }
+        Ok(map)
     }
 
-    pub fn cookie_from_header(&self, header: Header) -> Result<Cookie, anyhow::Error> {
+    pub fn cookies_from_header(
+        &self,
+        header: Header,
+    ) -> Result<HashMap<String, Cookie>, anyhow::Error> {
         if header.key == "set-cookie" {
-            self.cookie_from_str(&header.value)
+            self.cookies_from_str(&header.value)
         } else {
             Err(anyhow::Error::msg("Invalid Header Name For Cookie"))
         }
@@ -281,8 +288,8 @@ mod tests {
         let config = CookieConfig::default();
         let cookie = config.new_cookie("id", "hi");
         let header = cookie.into_header();
-        let decoded_coookie = config.cookie_from_header(header).unwrap();
-        assert_eq!(cookie, decoded_coookie);
+        let decoded_coookie = config.cookies_from_header(header).unwrap();
+        assert_eq!(&cookie, decoded_coookie.get("id").unwrap());
     }
 
     #[test]
@@ -290,8 +297,8 @@ mod tests {
         let config = CookieConfig::default();
         let cookie = config.new_cookie("id", "hi");
         let header = cookie.into_header();
-        let decoded_cookie = config.cookie_from_header(header).unwrap();
-        assert_eq!(cookie, decoded_cookie);
+        let decoded_cookie = config.cookies_from_header(header).unwrap();
+        assert_eq!(&cookie, decoded_cookie.get("id").unwrap());
     }
 
     #[test]
@@ -299,12 +306,12 @@ mod tests {
         let config = CookieConfig::default();
         let mut cookie = config.new_cookie("id", "hi");
         let header = cookie.into_header();
-        let decoded_cookie = config.cookie_from_header(header).unwrap();
-        assert_eq!(cookie, decoded_cookie);
+        let decoded_cookie = config.cookies_from_header(header).unwrap();
+        assert_eq!(&cookie, decoded_cookie.get("id").unwrap());
 
         cookie.delete();
         let header = cookie.into_header();
-        let decoded_cookie = config.cookie_from_header(header).unwrap();
-        assert_eq!(cookie, decoded_cookie);
+        let decoded_cookie = config.cookies_from_header(header).unwrap();
+        assert_eq!(&cookie, decoded_cookie.get("id").unwrap());
     }
 }
