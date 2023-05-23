@@ -1,6 +1,6 @@
+use base64::{engine::general_purpose, Engine as _};
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use secrecy::SecretString;
-use base64::{Engine as _, engine::general_purpose, alphabet::Alphabet};
 
 pub fn generate_random_secret() -> SecretString {
     let rand_string: String = thread_rng()

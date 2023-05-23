@@ -12,7 +12,7 @@ use nucleus_http::{
     Server,
 };
 use pretty_env_logger;
-use std::{format, println};
+use std::format;
 use std::sync::{Arc, RwLock};
 use tokio;
 
@@ -61,10 +61,9 @@ pub async fn launch_dev_server() -> u16 {
 }
 
 async fn whats_my_cookie(state: AppState, r: Request) -> Result<String, String> {
-    log::debug!("request {:#?}", &r);
     if let Some(cookie_header) = r.get_header_value("Cookie") {
         log::debug!("{:#?}", cookie_header);
-       if let Ok(cookies) = state.cookie_config.cookies_from_str(&cookie_header) {
+        if let Ok(cookies) = state.cookie_config.cookies_from_str(&cookie_header) {
             if let Some(flavor) = cookies.get("flavor") {
                 return Ok(format!("You Have A {} Cookie", flavor.value()));
             }

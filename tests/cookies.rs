@@ -1,6 +1,5 @@
 mod common;
 use common::*;
-use reqwest::header::COOKIE;
 
 #[tokio::test]
 async fn cookies() {
