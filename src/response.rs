@@ -135,7 +135,8 @@ impl From<&str> for Response {
 
 impl From<anyhow::Error> for Response {
     fn from(value: anyhow::Error) -> Self {
-       let message = format!("<h1>Error 500 Internal Server Error</h1>\r\n<h2>{}</h2>", value); 
+        log::error!("500: {}", value);
+       let message = format!("<h1>Error 500 Internal Server Error</h1>\r\n"); 
         Response {
             status: StatusCode::ErrInternalServer, //FIXME: make this smarter
             body: message.into(),
