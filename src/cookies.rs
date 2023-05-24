@@ -118,12 +118,7 @@ impl CookieConfig {
     pub fn cookies_from_str(&self, value: &str) -> Result<HashMap<String, Cookie>, anyhow::Error> {
         let values: Vec<_> = value.split("; ").collect();
         let mut iterator = values.into_iter();
-        let mut secure = false;
-        let mut http_only = false;
-        let mut same_site = None;
-        let mut domain = None;
-        let mut path = None;
-        let mut expiration = None;
+        let mut config = self.clone();
         let mut map = HashMap::new();
         let mut raw_cookie_list = vec![];
 
@@ -132,29 +127,29 @@ impl CookieConfig {
             let n = split[0];
             match n {
                 "Secure" => {
-                    secure = true;
+                    config.secure = true;
                 }
                 "HttpOnly" => {
-                    http_only = true;
+                    config.http_only = true;
                 }
                 "SameSite" => {
                     if split.len() > 1 {
-                        same_site = Some(split[1].to_string());
+                        config.same_site = Some(split[1].to_string());
                     }
                 }
                 "Domain" => {
                     if split.len() > 1 {
-                        domain = Some(split[1].to_string());
+                        config.domain = Some(split[1].to_string());
                     }
                 }
                 "Path" => {
                     if split.len() > 1 {
-                        path = Some(split[1].to_string());
+                        config.path = Some(split[1].to_string());
                     }
                 }
                 "Expires" => {
                     if split.len() > 1 {
-                        expiration = Some(split[1].to_string());
+                        config.expiration = Some(split[1].to_string());
                     }
                 }
                 _ => {
@@ -163,15 +158,6 @@ impl CookieConfig {
             }
         }
 
-        let config = CookieConfig {
-            secure,
-            http_only,
-            same_site,
-            domain,
-            path,
-            expiration,
-            secret: self.secret.clone(),
-        };
         for (n, v) in raw_cookie_list {
             let encoded_value = v;
             let decoded_value =
