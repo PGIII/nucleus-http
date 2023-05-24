@@ -106,6 +106,12 @@ impl CookieConfig {
         Cookie::new_with_config(self, name, value)
     }
 
+    pub fn delete_cookie(&self, name: &str) -> Cookie {
+        let mut config = self.clone();
+        config.expiration = Some("Thu, 01 Jan 1970 00:00:00 GMT".into());
+        config.new_cookie("id", "")
+    }
+
     pub fn is_valid_signature(&self, payload: &CookiePayload) -> Result<(), anyhow::Error> {
         let mut mac = HmacSha256::new_from_slice(self.secret.expose_secret().as_bytes())
             .context("Error Creating Signature Hash")?;
@@ -169,12 +175,12 @@ impl CookieConfig {
                     match serde_json::from_str(&json_string) {
                         Ok(payload) => {
                             if self.is_valid_signature(&payload).is_ok() {
-                                let cookie = config.new_cookie(&n, &payload.value);
+                                let cookie = config.new_cookie(&n, &cookie_payload.value);
                                 map.insert(n, cookie);
                             }
-                        },
+                        }
                         Err(e) => {
-                            log::warn!("Cookie Serilaztion Error: {}", e.to_string()); 
+                            log::warn!("Cookie Serilaztion Error: {}", e.to_string());
                         }
                     }
                 } else {
