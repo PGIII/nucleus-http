@@ -7,7 +7,7 @@ use hmac::{Hmac, Mac};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use std::{collections::HashMap, format, vec};
+use std::{collections::HashMap, format, println, vec};
 
 #[derive(Debug, Clone)]
 pub struct CookieConfig {
@@ -153,7 +153,11 @@ impl CookieConfig {
                     }
                 }
                 _ => {
-                    raw_cookie_list.push((n.to_string(), split[1].to_string()));
+                    if split.len() == 2 {
+                        raw_cookie_list.push((n.to_string(), split[1].to_string()));
+                    } else {
+                        raw_cookie_list.push((n.to_string(), String::new()));
+                    }
                 }
             }
         }
@@ -161,12 +165,18 @@ impl CookieConfig {
         for (n, v) in raw_cookie_list {
             let encoded_value = v;
             if let Ok(decoded_value) = base64_decode(encoded_value) {
-                let json_string = String::from_utf8(decoded_value)
-                    .context("Error converting cookie value to string")?;
-                let cookie_payload: CookiePayload = serde_json::from_str(&json_string)?;
-                if self.is_valid_signature(&cookie_payload).is_ok() {
-                    let cookie = config.new_cookie(&n, &cookie_payload.value);
-                    map.insert(n, cookie);
+                if let Ok(json_string) = String::from_utf8(decoded_value) {
+                    match serde_json::from_str(&json_string) {
+                        Ok(payload) => {
+                            if self.is_valid_signature(&payload).is_ok() {
+                                let cookie = config.new_cookie(&n, &payload.value);
+                                map.insert(n, cookie);
+                            }
+                        },
+                        Err(e) => {
+                            log::warn!("Cookie Serilaztion Error: {}", e.to_string()); 
+                        }
+                    }
                 } else {
                     log::warn!("Got a cookie with invalid signature");
                 }
@@ -240,8 +250,9 @@ impl CookieConfig {
 impl IntoHeader for Cookie {
     fn into_header(&self) -> crate::http::Header {
         let cookie_value = self.sign();
-        let cookie_json = serde_json::to_string(&cookie_value).unwrap(); //FIXME: How should we
-                                                                         //handle an error here ?
+        let cookie_json =
+            serde_json::to_string(&cookie_value).expect("Error Serializing Cookie value"); //FIXME: How should we
+                                                                                           //handle an error here ?
         let cookie_base64 = base64_encode(cookie_json.into());
         let mut header_value = format!("{}={}", self.name, cookie_base64);
 
@@ -275,6 +286,8 @@ impl IntoHeader for Cookie {
 
 #[cfg(test)]
 mod tests {
+    use std::dbg;
+
     use super::*;
 
     #[test]
@@ -308,5 +321,22 @@ mod tests {
         let header = cookie.into_header();
         let decoded_cookie = config.cookies_from_header(header).unwrap();
         assert_eq!(&cookie, decoded_cookie.get("id").unwrap());
+    }
+
+    #[test]
+    fn other_cookies() {
+        let config = CookieConfig::default();
+        let cookie = config.new_cookie("id", "hi");
+        let header = cookie.into_header();
+        let decoded_cookie = config.cookies_from_header(header.clone()).unwrap();
+        assert_eq!(&cookie, decoded_cookie.get("id").expect("no cookie"));
+
+        let cookie_str = format!("bob=; robert=bob; this_is=c2VjcmV0; {}", header.value);
+        dbg!(&cookie_str);
+        let cookies = config
+            .cookies_from_str(&cookie_str)
+            .expect("Error Parsing String into Cookies");
+        dbg!(&cookies);
+        assert_eq!("hi", cookies.get("id").unwrap().value());
     }
 }
