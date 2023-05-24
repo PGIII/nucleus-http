@@ -109,7 +109,7 @@ impl CookieConfig {
     pub fn delete_cookie(&self, name: &str) -> Cookie {
         let mut config = self.clone();
         config.expiration = Some("Thu, 01 Jan 1970 00:00:00 GMT".into());
-        config.new_cookie("id", "")
+        config.new_cookie(name, "")
     }
 
     pub fn is_valid_signature(&self, payload: &CookiePayload) -> Result<(), anyhow::Error> {
