@@ -160,16 +160,18 @@ impl CookieConfig {
 
         for (n, v) in raw_cookie_list {
             let encoded_value = v;
-            let decoded_value =
-                base64_decode(encoded_value).context("Error Decoding base64 from cookie")?;
-            let json_string = String::from_utf8(decoded_value)
-                .context("Error converting cookie value to string")?;
-            let cookie_payload: CookiePayload = serde_json::from_str(&json_string)?;
-            if self.is_valid_signature(&cookie_payload).is_ok() {
-                let cookie = config.new_cookie(&n, &cookie_payload.value);
-                map.insert(n, cookie);
+            if let Ok(decoded_value) = base64_decode(encoded_value) {
+                let json_string = String::from_utf8(decoded_value)
+                    .context("Error converting cookie value to string")?;
+                let cookie_payload: CookiePayload = serde_json::from_str(&json_string)?;
+                if self.is_valid_signature(&cookie_payload).is_ok() {
+                    let cookie = config.new_cookie(&n, &cookie_payload.value);
+                    map.insert(n, cookie);
+                } else {
+                    log::warn!("Got a cookie with invalid signature");
+                }
             } else {
-                log::warn!("Got a cookie with invalid signature");
+                log::warn!("Got a cookie not from us")
             }
         }
         Ok(map)
