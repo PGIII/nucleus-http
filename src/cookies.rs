@@ -175,7 +175,7 @@ impl CookieConfig {
                     match serde_json::from_str(&json_string) {
                         Ok(payload) => {
                             if self.is_valid_signature(&payload).is_ok() {
-                                let cookie = config.new_cookie(&n, &cookie_payload.value);
+                                let cookie = config.new_cookie(&n, &payload.value);
                                 map.insert(n, cookie);
                             }
                         }
