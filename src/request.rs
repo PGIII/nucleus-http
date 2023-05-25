@@ -1,5 +1,5 @@
 use core::fmt;
-use std::collections::HashMap;
+use std::{collections::HashMap, println};
 
 use crate::http::{Header, Method, Version};
 
@@ -39,7 +39,7 @@ impl From<&Error> for String {
             Error::InvalidHTTPVersion => "Unsupported HTTP version Request".to_string(),
             Error::MissingBlankLine => "Missing Blank Line".to_string(),
             Error::WaitingOnBody => "Waiting On Body".to_string(),
-            Error::InvalidContentLength => "Content Length Invalid".to_string()
+            Error::InvalidContentLength => "Content Length Invalid".to_string(),
         }
     }
 }
@@ -184,7 +184,9 @@ impl Request {
                     if blank_line_split[1].len() < len {
                         return Err(Error::WaitingOnBody);
                     } else {
-                        req.body.extend_from_slice(blank_line_split[1].as_bytes());
+                        let body = &blank_line_split[1][0..len];
+                        req.body.extend_from_slice(body.as_bytes());
+                        println!("{:#?}", req.body);
                         return Ok(req);
                     }
                 } else {
@@ -203,7 +205,32 @@ impl Request {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_eq;
+
     use super::*;
+
+    #[test]
+    fn x_url_encoded_form() {
+        let expected = Request {
+            method: Method::POST,
+            version: Version::V1_1,
+            path: "/test".to_string(),
+            body: "field1=value1&field2=value2".into(),
+            headers: HashMap::from([
+                ("host".to_string(), "foo.example".to_string()),
+                (
+                    "content-type".to_string(),
+                    "application/x-www-form-urlencoded".to_string(),
+                ),
+                ("content-length".to_string(), "27".to_string()),
+            ]),
+            host: "foo.example".to_string(),
+            query_string: None,
+        };
+        let request_str = "POST /test HTTP/1.1\r\nHost: foo.example\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 27\r\n\r\nfield1=value1&field2=value2\r\n";
+        let request = Request::from_string(request_str.to_string()).expect("Could not build request");
+        assert_eq!(expected, request);
+    }
 
     #[test]
     fn get_wrong_version_new() {
