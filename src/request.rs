@@ -303,7 +303,6 @@ impl Request {
             return Err(Error::InvalidString);
         }
 
-        log::debug!("{}", &request_str);
         let blank_line_split: Vec<&str> = request_str.split("\r\n\r\n").collect();
         let lines: Vec<&str> = blank_line_split[0].split("\r\n").collect();
 
