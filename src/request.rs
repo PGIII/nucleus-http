@@ -1,7 +1,17 @@
 use core::fmt;
-use std::{collections::HashMap, println};
+use std::{
+    any,
+    collections::{HashMap, VecDeque},
+    format, println, todo, vec,
+};
 
 use crate::http::{Header, Method, Version};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FormTypes {
+    None,
+    MultiPart(Vec<MultiPartFormEntry>),
+}
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct Request {
@@ -12,6 +22,7 @@ pub struct Request {
     query_string: Option<String>,
     headers: HashMap<String, String>,
     body: Vec<u8>,
+    form_data: FormTypes,
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -23,8 +34,82 @@ pub enum Error {
     NoHostHeader,
     InvalidContentLength,
     WaitingOnBody,
+    MissingMultiPartBoundary,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MultiPartFormEntry {
+    name: String,
+    file_name: Option<String>,
+    content_type: Option<String>,
+    value: Vec<u8>,
+}
+
+impl MultiPartFormEntry {
+    pub fn from_str(form_str: &str) -> Result<MultiPartFormEntry, anyhow::Error> {
+        //first split out body
+        let split: Vec<_> = form_str.split("\r\n\r\n").collect();
+        if let (Some(header), Some(body)) = (split.get(0), split.get(1)) {
+            let mut lines = header.split("\r\n");
+            let mut form_args: HashMap<&str, &str> = HashMap::new();
+            let mut content_type = None;
+            while let Some(line) = lines.next() {
+                let name_value_split: Vec<_> = line.split(": ").collect();
+                if let (Some(header_name), Some(header_value)) =
+                    (name_value_split.get(0), name_value_split.get(1))
+                {
+                    match header_name.to_lowercase().as_str() {
+                        "content-type" => {
+                            content_type = Some(header_value.to_string());
+                        }
+                        "content-disposition" => {
+                            let mut split = header_value.split("; ");
+                            while let Some(op) = split.next() {
+                                let nv: Vec<_> = op.split("=").collect();
+                                if let (Some(n), Some(v)) = (nv.get(0), nv.get(1)) {
+                                    form_args.insert(n, strip_quotes(v));
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if let Some(name) = form_args.get("name") {
+                let name = name.to_string();
+                let file = form_args.get("filename").map(|s| s.to_string());
+                Ok(MultiPartFormEntry {
+                    name,
+                    file_name: file,
+                    content_type,
+                    value: body.as_bytes().into(),
+                })
+            } else {
+                Err(anyhow::Error::msg("Missing Name"))
+            }
+        } else {
+            Err(anyhow::Error::msg("Missing Body"))
+        }
+    }
+
+    pub fn name_value(name: &str, value: &str) -> Self {
+        MultiPartFormEntry {
+            name: name.to_string(),
+            file_name: None,
+            content_type: None,
+            value: value.to_string().into(),
+        }
+    }
+
+    pub fn file(name: &str, file_name: &str, value: &str) -> Self {
+        MultiPartFormEntry {
+            name: name.to_string(),
+            file_name: Some(file_name.to_string()),
+            content_type: None,
+            value: value.to_string().into(),
+        }
+    }
+}
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", String::from(self))
@@ -40,6 +125,7 @@ impl From<&Error> for String {
             Error::MissingBlankLine => "Missing Blank Line".to_string(),
             Error::WaitingOnBody => "Waiting On Body".to_string(),
             Error::InvalidContentLength => "Content Length Invalid".to_string(),
+            Error::MissingMultiPartBoundary => "Missing Mulipart boundary".to_string(),
         }
     }
 }
@@ -47,6 +133,54 @@ impl From<&Error> for String {
 impl From<Error> for String {
     fn from(value: Error) -> Self {
         String::from(&value)
+    }
+}
+
+fn get_boundary<'a>(content_type_value_str: &'a str) -> Result<&'a str, anyhow::Error> {
+    let parts: Vec<_> = content_type_value_str.split(";").collect();
+    if parts.len() > 1 {
+        let nv: Vec<_> = parts[1].split("=").collect();
+        if nv.len() > 1 {
+            let quote_split: Vec<_> = nv[1].split("\"").collect();
+            if quote_split.len() > 1 {
+                Ok(quote_split[1])
+            } else {
+                Err(anyhow::Error::msg("Missing Quotes"))
+            }
+        } else {
+            Err(anyhow::Error::msg("Invalid boundary"))
+        }
+    } else {
+        Err(anyhow::Error::msg("Boundary Missing from string"))
+    }
+}
+
+fn get_multiparts_entries_from_str(
+    body: &str,
+    boundary: &str,
+) -> anyhow::Result<Vec<MultiPartFormEntry>> {
+    let end_marker = format!("--");
+    let boundary_marker = format!("--{}", boundary);
+    let bodies: Vec<_> = body.split(&boundary_marker).collect();
+    let mut entries = vec![];
+    if bodies[bodies.len() - 1] == end_marker {
+        for m_body in bodies {
+            if let Ok(entry) = MultiPartFormEntry::from_str(m_body) {
+                entries.push(entry);
+            }
+        }
+        return Ok(entries);
+    } else {
+        return Err(anyhow::Error::msg("Not Full Body"));
+    }
+}
+
+fn strip_quotes(value: &str) -> &str {
+    let split: Vec<_> = value.split("\"").collect();
+    if let Some(v) = split.get(1) {
+        return v;
+    } else {
+        return split[0];
     }
 }
 
@@ -94,7 +228,7 @@ impl Request {
         return headers.get(&lower).cloned();
     }
 
-    pub fn from_lines(lines: &Vec<String>) -> Result<Request, Error> {
+    pub fn from_lines<'a>(lines: &Vec<&'a str>) -> Result<Request, Error> {
         let method;
         let version;
         let path;
@@ -102,6 +236,7 @@ impl Request {
         let host;
         let mut query_string = None;
         let body = vec![];
+        let form_data = FormTypes::None;
 
         let request_seperated: Vec<&str> = lines[0].split(" ").collect(); //First line is request
         if request_seperated.len() < 3 {
@@ -135,7 +270,7 @@ impl Request {
         if lines.len() > 1 {
             //FIXME: Dont we need to collect here?
             for i in 1..lines.len() {
-                if let Ok(header) = Header::try_from(&lines[i]) {
+                if let Ok(header) = Header::try_from(lines[i]) {
                     headers.insert(header.key, header.value);
                 }
                 //headers.push(lines[i].to_string());
@@ -160,6 +295,7 @@ impl Request {
             host,
             query_string,
             body,
+            form_data,
         });
     }
 
@@ -175,8 +311,8 @@ impl Request {
         if blank_line_split.len() == 1 {
             return Err(Error::MissingBlankLine);
         }
-        let lines_string: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
-        let request = Request::from_lines(&lines_string);
+
+        let request = Request::from_lines(&lines);
         if let Ok(mut req) = request.clone() {
             //check for content length header
             if let Some(content_lenth) = req.get_header_value("Content-Length") {
@@ -186,11 +322,24 @@ impl Request {
                     } else {
                         let body = &blank_line_split[1][0..len];
                         req.body.extend_from_slice(body.as_bytes());
-                        println!("{:#?}", req.body);
                         return Ok(req);
                     }
                 } else {
                     return Err(Error::InvalidContentLength);
+                }
+            } else if let Some(content_type) = req.get_header_value("Content-Type") {
+                // this could be parsed earlier and an enum could be used
+                if content_type.contains("multipart/form-data;") {
+                    if let Ok(boundary) = get_boundary(&content_type) {
+                        // last form is marked by -- after boundary
+                        let body = &blank_line_split[1..blank_line_split.len()].join("\r\n\r\n");
+                        let entries = get_multiparts_entries_from_str(body, boundary)
+                            .expect("Error parsing entries");
+                        req.form_data = FormTypes::MultiPart(entries);
+                        return Ok(req);
+                    } else {
+                        return Err(Error::MissingMultiPartBoundary);
+                    }
                 }
             }
         }
@@ -226,9 +375,56 @@ mod tests {
             ]),
             host: "foo.example".to_string(),
             query_string: None,
+            form_data: FormTypes::None,
         };
-        let request_str = "POST /test HTTP/1.1\r\nHost: foo.example\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 27\r\n\r\nfield1=value1&field2=value2\r\n";
-        let request = Request::from_string(request_str.to_string()).expect("Could not build request");
+        let request_str = "POST /test HTTP/1.1\r\n\
+            Host: foo.example\r\n\
+            Content-Type: application/x-www-form-urlencoded\r\n\
+            Content-Length: 27\r\n\r\n\
+            field1=value1&field2=value2\r\n"; //does this normally have CRLF here ?
+        let request =
+            Request::from_string(request_str.to_string()).expect("Could not build request");
+        assert_eq!(expected, request);
+    }
+
+    #[test]
+    fn multipart_form() {
+        let expected = Request {
+            method: Method::POST,
+            version: Version::V1_1,
+            path: "/test".to_string(),
+            body: vec![],
+            headers: HashMap::from([
+                ("host".to_string(), "foo.example".to_string()),
+                (
+                    "content-type".to_string(),
+                    "multipart/form-data;boundary=\"boundary\"".to_string(),
+                ),
+            ]),
+            host: "foo.example".to_string(),
+            query_string: None,
+            form_data: FormTypes::MultiPart(vec![
+                MultiPartFormEntry::name_value("field1", "value1\r\n"), // in this scenario /r/n
+                // should be included right ?
+                MultiPartFormEntry::file("field2", "example.txt", "value2\r\n"),
+            ]),
+        };
+        let request_str = "POST /test HTTP/1.1\r\n\
+        Host: foo.example\r\n\
+        Content-Type: multipart/form-data;boundary=\"boundary\"\r\n\
+        \r\n\
+        --boundary\r\n\
+        Content-Disposition: form-data; name=\"field1\"\r\n\
+        \r\n\
+        value1\r\n\
+        --boundary\r\n\
+        Content-Disposition: form-data; name=\"field2\"; filename=\"example.txt\"\r\n\
+        \r\n\
+        value2\r\n\
+        --boundary--";
+
+        let request =
+            Request::from_string(request_str.to_string()).expect("Could not build request");
         assert_eq!(expected, request);
     }
 
@@ -256,6 +452,7 @@ mod tests {
             headers: HashMap::from([("host".to_string(), "test".to_string())]),
             host: "test".to_string(),
             query_string: None,
+            form_data: FormTypes::None,
         };
         let request = Request::from_string("GET / HTTP/1.1\r\nHost: test\r\n\r\n".to_owned())
             .expect("Error Parsing");
@@ -272,6 +469,7 @@ mod tests {
             headers: HashMap::from([("host".to_string(), "test".to_string())]),
             host: "test".to_string(),
             query_string: Some("test=true".to_string()),
+            form_data: FormTypes::None,
         };
         let request = Request::from_string(
             "GET /index.html?test=true HTTP/1.1\r\nHost: test\r\n\r\n".to_owned(),
@@ -294,6 +492,7 @@ mod tests {
             ]),
             host: "test".to_string(),
             query_string: None,
+            form_data: FormTypes::None,
         };
         let request = Request::from_string(
             "GET / HTTP/1.1\r\nhost: test\r\nheader1: hi\r\nheader2: Bye\r\n\r\n".to_owned(),

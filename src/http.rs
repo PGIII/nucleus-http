@@ -191,6 +191,22 @@ impl TryFrom<&String> for Header {
     }
 }
 
+impl TryFrom<&str> for Header {
+    type Error = &'static str;
+    fn try_from(string: &str) -> Result<Self, Self::Error> {
+        let split: Vec<&str> = string.split(": ").collect();
+        if split.len() == 2 {
+            let key = split[0].to_lowercase();
+            let value = split[1].to_string();
+            return Ok(Self { key, value });
+        } else if split.len() > 2 {
+            Err("Too many ': '")
+        } else {
+            Err("Invalid Key Value Pair")
+        }
+    }
+}
+
 impl From<&Header> for String {
     fn from(header: &Header) -> String {
         return format!("{}: {}", header.key, header.value);
