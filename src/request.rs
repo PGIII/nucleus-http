@@ -350,6 +350,10 @@ impl Request {
     pub fn query_string(&self) -> Option<&String> {
         self.query_string.as_ref()
     }
+
+    pub fn form_data(&self) -> &FormTypes {
+        &self.form_data
+    }
 }
 
 #[cfg(test)]
