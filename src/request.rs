@@ -143,13 +143,8 @@ fn get_boundary<'a>(content_type_value_str: &'a str) -> Result<&'a str, anyhow::
     let parts: Vec<_> = content_type_value_str.split(";").collect();
     if parts.len() > 1 {
         let nv: Vec<_> = parts[1].split("=").collect();
-        if nv.len() > 1 {
-            let quote_split: Vec<_> = nv[1].split("\"").collect();
-            if quote_split.len() > 1 {
-                Ok(quote_split[1])
-            } else {
-                Err(anyhow::Error::msg("Missing Quotes"))
-            }
+        if let Some(boundary) = nv.get(1) {
+            Ok(strip_quotes(boundary))
         } else {
             Err(anyhow::Error::msg("Invalid boundary"))
         }
@@ -319,9 +314,8 @@ impl Request {
         if let Ok(mut req) = request.clone() {
             if let Some(content_type) = req.get_header_value("Content-Type") {
                 match content_type {
-                    x if x.contains("multipart/form-data;") => {
-                        if let Ok(boundary) = get_boundary(&x) {
-                            // last form is marked by -- after boundary
+                    x if x.contains("multipart/form-data;") => match get_boundary(&x) {
+                        Ok(boundary) => {
                             let body =
                                 &blank_line_split[1..blank_line_split.len()].join("\r\n\r\n");
                             match get_multiparts_entries_from_str(body, boundary) {
@@ -333,10 +327,12 @@ impl Request {
                                     return Err(Error::WaitingOnBody);
                                 }
                             }
-                        } else {
+                        }
+                        Err(e) => {
+                            log::debug!("{}", e.to_string());
                             return Err(Error::MissingMultiPartBoundary);
                         }
-                    }
+                    },
                     x if x.contains("application/x-www-form-urlencoded") => {
                         if let Some(content_lenth) = req.get_header_value("Content-Length") {
                             if let Ok(len) = content_lenth.parse() {
