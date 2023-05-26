@@ -35,6 +35,23 @@ pub enum Error {
     InvalidContentLength,
     WaitingOnBody,
     MissingMultiPartBoundary,
+    MissingContentLength,
+}
+
+impl From<&Error> for String {
+    fn from(value: &Error) -> Self {
+        match value {
+            Error::InvalidString => "Invalid String".to_string(),
+            Error::NoHostHeader => "No VHost Specified".to_string(),
+            Error::InvalidMethod => "Invalid Method Requested".to_string(),
+            Error::InvalidHTTPVersion => "Unsupported HTTP version Request".to_string(),
+            Error::MissingBlankLine => "Missing Blank Line".to_string(),
+            Error::WaitingOnBody => "Waiting On Body".to_string(),
+            Error::InvalidContentLength => "Content Length Invalid".to_string(),
+            Error::MissingMultiPartBoundary => "Missing Mulipart boundary".to_string(),
+            Error::MissingContentLength => "Missing Content Length Header".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,20 +130,6 @@ impl MultiPartFormEntry {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", String::from(self))
-    }
-}
-impl From<&Error> for String {
-    fn from(value: &Error) -> Self {
-        match value {
-            Error::InvalidString => "Invalid String".to_string(),
-            Error::NoHostHeader => "No VHost Specified".to_string(),
-            Error::InvalidMethod => "Invalid Method Requested".to_string(),
-            Error::InvalidHTTPVersion => "Unsupported HTTP version Request".to_string(),
-            Error::MissingBlankLine => "Missing Blank Line".to_string(),
-            Error::WaitingOnBody => "Waiting On Body".to_string(),
-            Error::InvalidContentLength => "Content Length Invalid".to_string(),
-            Error::MissingMultiPartBoundary => "Missing Mulipart boundary".to_string(),
-        }
     }
 }
 
@@ -314,32 +317,44 @@ impl Request {
 
         let request = Request::from_lines(&lines);
         if let Ok(mut req) = request.clone() {
-            //check for content length header
-            if let Some(content_lenth) = req.get_header_value("Content-Length") {
-                if let Ok(len) = content_lenth.parse() {
-                    if blank_line_split[1].len() < len {
-                        return Err(Error::WaitingOnBody);
-                    } else {
-                        let body = &blank_line_split[1][0..len];
-                        req.body.extend_from_slice(body.as_bytes());
-                        return Ok(req);
+            if let Some(content_type) = req.get_header_value("Content-Type") {
+                match content_type {
+                    x if x.contains("multipart/form-data;") => {
+                        if let Ok(boundary) = get_boundary(&x) {
+                            // last form is marked by -- after boundary
+                            let body =
+                                &blank_line_split[1..blank_line_split.len()].join("\r\n\r\n");
+                            match get_multiparts_entries_from_str(body, boundary) {
+                                Ok(entries) => {
+                                    req.form_data = FormTypes::MultiPart(entries);
+                                    return Ok(req);
+                                }
+                                Err(_) => {
+                                    return Err(Error::WaitingOnBody);
+                                }
+                            }
+                        } else {
+                            return Err(Error::MissingMultiPartBoundary);
+                        }
                     }
-                } else {
-                    return Err(Error::InvalidContentLength);
-                }
-            } else if let Some(content_type) = req.get_header_value("Content-Type") {
-                // this could be parsed earlier and an enum could be used
-                if content_type.contains("multipart/form-data;") {
-                    if let Ok(boundary) = get_boundary(&content_type) {
-                        // last form is marked by -- after boundary
-                        let body = &blank_line_split[1..blank_line_split.len()].join("\r\n\r\n");
-                        let entries = get_multiparts_entries_from_str(body, boundary)
-                            .expect("Error parsing entries");
-                        req.form_data = FormTypes::MultiPart(entries);
-                        return Ok(req);
-                    } else {
-                        return Err(Error::MissingMultiPartBoundary);
+                    x if x.contains("application/x-www-form-urlencoded") => {
+                        if let Some(content_lenth) = req.get_header_value("Content-Length") {
+                            if let Ok(len) = content_lenth.parse() {
+                                if blank_line_split[1].len() < len {
+                                    return Err(Error::WaitingOnBody);
+                                } else {
+                                    let body = &blank_line_split[1][0..len];
+                                    req.body.extend_from_slice(body.as_bytes());
+                                    return Ok(req);
+                                }
+                            } else {
+                                return Err(Error::InvalidContentLength);
+                            }
+                        } else {
+                            return Err(Error::MissingContentLength);
+                        }
                     }
+                    _ => {}
                 }
             }
         }
