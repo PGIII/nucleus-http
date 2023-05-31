@@ -109,10 +109,8 @@ async fn post(state: AppState, req: Request) -> Result<Response, Infallible> {
 async fn multipart(state: AppState, req: Request) -> Result<Response, Infallible> {
     match req.form_data() {
         FormTypes::MultiPart(f) => {
-            for entry in f {
-                if let Some(f_name) = entry.file_name() {
-                    return Ok(format!("Got File: {}", f_name).into());
-                }
+            if let Some(file_entry) = f.get("cover_image") {
+                return Ok(format!("Got File: {}", file_entry.file_name().unwrap()).into());
             }
         }
         _ => {

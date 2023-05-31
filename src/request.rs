@@ -8,7 +8,7 @@ use std::{collections::HashMap, format, println, vec};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FormTypes {
     None,
-    MultiPart(Vec<MultiPartFormEntry>),
+    MultiPart(HashMap<String, MultiPartFormEntry>),
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -227,16 +227,16 @@ fn get_boundary<'a>(content_type_value_str: &'a str) -> Result<&'a str, anyhow::
 fn get_multiparts_entries_from_str(
     body: &str,
     boundary: &str,
-) -> anyhow::Result<Vec<MultiPartFormEntry>> {
+) -> anyhow::Result<HashMap<String, MultiPartFormEntry>> {
     let end_marker = format!("--{}--", boundary);
     let boundary_marker = format!("--{}", boundary);
     if body.contains(&end_marker) {
         let bodies: Vec<_> = body.split(&boundary_marker).collect();
-        let mut entries = vec![];
+        let mut entries = HashMap::new();
         if bodies[bodies.len() - 1] == "--" {
             for m_body in bodies {
                 if let Ok(entry) = MultiPartFormEntry::from_str(m_body) {
-                    entries.push(entry);
+                    entries.insert(entry.name.clone(), entry);
                 }
             }
             return Ok(entries);
@@ -251,7 +251,7 @@ fn get_multiparts_entries_from_str(
 fn get_multiparts_entries_from_bytes(
     body: &[u8],
     boundary: &[u8],
-) -> anyhow::Result<Vec<MultiPartFormEntry>> {
+) -> anyhow::Result<HashMap<String, MultiPartFormEntry>> {
     let mut end_marker = vec![b'-', b'-'];
     end_marker.extend_from_slice(boundary);
     let boundary_marker = end_marker.clone();
@@ -260,7 +260,7 @@ fn get_multiparts_entries_from_bytes(
         //we have an en marker go through the bodies, body is anything after marker before next
         //marker or end boundary
         let mut body_spliter = memmem::find_iter(&body, &boundary_marker);
-        let mut entries = vec![];
+        let mut entries = HashMap::new();
         if let Some(mut last_bound) = body_spliter.next() {
             last_bound = last_bound + boundary_marker.len();
             while let Some(bound) = body_spliter.next() {
@@ -270,7 +270,7 @@ fn get_multiparts_entries_from_bytes(
                 if let Ok(entry) =
                     MultiPartFormEntry::from_str(&String::from_utf8_lossy(current_body))
                 {
-                    entries.push(entry);
+                    entries.insert(entry.name.clone(), entry);
                 }
             }
         } else {
@@ -638,6 +638,11 @@ mod tests {
 
     #[test]
     fn multipart_form() {
+        let field1 = MultiPartFormEntry::name_value("field1", "value1\r\n");
+        let field2 = MultiPartFormEntry::file("field2", "example.txt", "value2\r\n");
+        let mut map = HashMap::new();
+        map.insert(field1.name.clone(), field1);
+        map.insert(field2.name.clone(), field2);
         let expected = Request {
             method: Method::POST,
             version: Version::V1_1,
@@ -652,11 +657,7 @@ mod tests {
             ]),
             host: "foo.example".to_string(),
             query_string: None,
-            form_data: FormTypes::MultiPart(vec![
-                MultiPartFormEntry::name_value("field1", "value1\r\n"), // in this scenario /r/n
-                // should be included right ?
-                MultiPartFormEntry::file("field2", "example.txt", "value2\r\n"),
-            ]),
+            form_data: FormTypes::MultiPart(map),
         };
         let request_str = Bytes::from_static(
             b"POST /test HTTP/1.1\r\n\
