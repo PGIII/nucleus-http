@@ -1,3 +1,4 @@
+pub mod cookies;
 pub mod http;
 pub mod methods;
 pub mod request;
@@ -5,10 +6,10 @@ pub mod response;
 pub mod routes;
 pub mod state;
 pub mod thread_pool;
-pub mod virtual_host;
-pub mod cookies;
 pub mod utils;
+pub mod virtual_host;
 
+use bytes::{BufMut, BytesMut};
 use log;
 use response::Response;
 use routes::Router;
@@ -138,8 +139,9 @@ where
                 Ok(mut connection) => {
                     let router = self.router.clone();
                     log::info!("Accepted Connection From {}", connection.client_ip);
+
                     tokio::spawn(async move {
-                        let mut request_str = String::new();
+                        let mut request_bytes = BytesMut::with_capacity(1024);
                         loop {
                             let mut buffer = vec![0; 1024]; //Vector to avoid buffer on stack
                             match connection.stream.read(&mut buffer).await {
@@ -150,54 +152,53 @@ where
                                 Ok(n) => {
                                     //got some bytes append them and see if we need to do any proccessing
                                     for i in 0..n {
-                                        request_str.push(buffer[i] as char);
-                                        let request_result =
-                                            request::Request::from_string(request_str.clone());
-                                        match request_result {
-                                            Ok(r) => {
-                                                let router_locked = router.read().await;
-                                                let response = router_locked
-                                                    .route(&r, connection.virtual_hosts())
-                                                    .await;
-                                                if let Err(error) =
+                                        request_bytes.put_u8(buffer[i]);
+                                    }
+                                    let request_result =
+                                        request::Request::from_bytes(request_bytes.clone().into());
+                                    match request_result {
+                                        Ok(r) => {
+                                            let router_locked = router.read().await;
+                                            let response = router_locked
+                                                .route(&r, connection.virtual_hosts())
+                                                .await;
+                                            if let Err(error) =
+                                                connection.write_response(response).await
+                                            {
+                                                // not clearing string here so we can try
+                                                // again, otherwise might be terminated
+                                                // connection which will be handled
+                                                log::error!(
+                                                    "Error Writing response: {}",
+                                                    error.to_string()
+                                                );
+                                            } else {
+                                                request_bytes.clear();
+                                            }
+                                        }
+                                        Err(e) => match e {
+                                            request::Error::InvalidString
+                                            | request::Error::MissingBlankLine
+                                            | request::Error::WaitingOnBody => {
+                                                //Parital response keep reading
+                                            }
+                                            _ => {
+                                                let error_res = format!("400 bad request: {}", e);
+                                                log::debug!("{}", error_res);
+                                                let response = Response::error(
+                                                    http::StatusCode::ErrBadRequest,
+                                                    error_res.into(),
+                                                );
+                                                if let Err(err) =
                                                     connection.write_response(response).await
                                                 {
-                                                    // not clearing string here so we can try
-                                                    // again, otherwise might be terminated
-                                                    // connection which will be handled
                                                     log::error!(
-                                                        "Error Writing response: {}",
-                                                        error.to_string()
+                                                        "Error Writing Data: {}",
+                                                        err.to_string()
                                                     );
-                                                } else {
-                                                    request_str.clear();
                                                 }
                                             }
-                                            Err(e) => match e {
-                                                request::Error::InvalidString
-                                                | request::Error::MissingBlankLine
-                                                | request::Error::WaitingOnBody => {
-                                                    //Parital response keep reading
-                                                }
-                                                _ => {
-                                                    let error_res =
-                                                        format!("400 bad request: {}", e);
-                                                    log::debug!("{}", error_res);
-                                                    let response = Response::error(
-                                                        http::StatusCode::ErrBadRequest,
-                                                        error_res.into(),
-                                                    );
-                                                    if let Err(err) =
-                                                        connection.write_response(response).await
-                                                    {
-                                                        log::error!(
-                                                            "Error Writing Data: {}",
-                                                            err.to_string()
-                                                        );
-                                                    }
-                                                }
-                                            },
-                                        }
+                                        },
                                     }
                                 }
                                 Err(err) => {

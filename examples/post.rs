@@ -4,7 +4,7 @@ use tokio::sync::RwLock;
 use log;
 use nucleus_http::{
     http,
-    request::Request,
+    request::{FormTypes, Request},
     response::Response,
     routes::{Route, Router},
     virtual_host::VirtualHost,
@@ -44,6 +44,9 @@ async fn main() -> tokio::io::Result<()> {
     router.add_route(Route::get_static("/", "forms.html")).await;
     router.add_route(Route::get("/success", success)).await;
     router.add_route(Route::post("/handle_form", post)).await;
+    router
+        .add_route(Route::post("/multipart_form", multipart))
+        .await;
 
     let mut server = Server::bind(listener_ip, router).await?;
     server.add_virtual_host(localhost_vhost).await;
@@ -101,4 +104,21 @@ async fn post(state: AppState, req: Request) -> Result<Response, Infallible> {
     }
     res.add_header(("Location", "/success"));
     Ok(res)
+}
+
+async fn multipart(state: AppState, req: Request) -> Result<Response, Infallible> {
+    match req.form_data() {
+        FormTypes::MultiPart(f) => {
+            for entry in f {
+                if let Some(f_name) = entry.file_name() {
+                    return Ok(format!("Got File: {}", f_name).into());
+                }
+            }
+        }
+        _ => {
+            return Ok("Something went wrong".into());
+        }
+    }
+
+    Ok("Something went wrong".into())
 }

@@ -7,7 +7,7 @@ use hmac::{Hmac, Mac};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use std::{collections::HashMap, format, println, vec};
+use std::{collections::HashMap, format, vec};
 
 #[derive(Debug, Clone)]
 pub struct CookieConfig {

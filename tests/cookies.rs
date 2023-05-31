@@ -19,4 +19,4 @@ async fn cookies() {
     assert_eq!(url, res.url().to_string(), "Invalid URL");
     assert_eq!(reqwest::StatusCode::from_u16(200).unwrap(), res.status());
     assert_eq!(res.text().await.expect("Error Receiving Body"), "You Have A chocolate chip Cookie");
-}
+} 

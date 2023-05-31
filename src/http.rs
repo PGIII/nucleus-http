@@ -1,5 +1,6 @@
 use core::fmt;
 use enum_map::Enum;
+use memchr::memmem;
 use std::path::PathBuf;
 
 #[derive(PartialEq, Debug, Clone, Copy, Enum)]
@@ -44,6 +45,29 @@ pub enum MimeType {
     Icon,
     Binary,
     JPEG,
+}
+
+impl TryFrom<&[u8]> for Method {
+    type Error = String;
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        match value {
+            b"GET" => Ok(Method::GET),
+            b"POST" => Ok(Method::POST),
+            _ => Err("Invalid Method".to_owned()),
+        }
+    }
+}
+
+impl TryFrom<&[u8]> for Version {
+    type Error = String;
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        match value {
+            b"HTTP/1.0" => Ok(Version::V1_0),
+            b"HTTP/1.1" => Ok(Version::V1_1),
+            b"HTTP/2.2" => Ok(Version::V2_0),
+            _ => Err("invalid version".to_owned()),
+        }
+    }
 }
 
 /// HTTP headers are simple key value pairs both strings
@@ -204,6 +228,21 @@ impl TryFrom<&str> for Header {
         } else {
             Err("Invalid Key Value Pair")
         }
+    }
+}
+
+impl TryFrom<&[u8]> for Header {
+    type Error = &'static str;
+    fn try_from(h_str: &[u8]) -> Result<Self, Self::Error> {
+        let sep = b": ";
+        let key_end = memmem::find(h_str, sep).ok_or("missing ': '")?;
+        let value_start = key_end + sep.len();
+        let key = &h_str[0..key_end];
+        let value = &h_str[value_start..h_str.len()];
+        Ok(Self {
+            key: String::from_utf8_lossy(key).to_string().to_lowercase(),
+            value: String::from_utf8_lossy(value).to_string()
+        })
     }
 }
 
