@@ -113,22 +113,26 @@ impl MultiPartFormEntry {
         }
     }
 
-    pub fn from_bytes(form: Bytes) -> Result<MultiPartFormEntry, anyhow::Error> {
+    pub fn from_bytes(form: &[u8]) -> Result<MultiPartFormEntry, anyhow::Error> {
+        log::debug!("Processing multipart form");
         //first split out body
         if let Some(blank_line) = memmem::find(&form, b"\r\n\r\n") {
             let mut form_args: HashMap<String, String> = HashMap::new();
             let mut content_type = None;
-            let header = form.slice(0..blank_line + 2);
-            let body = form.slice(blank_line + 4..);
+            let header = &form[0..blank_line + 2];
+            let mut body = &form[blank_line + 4..];
+            if body[body.len() - 1] == b'\n' && body[body.len() - 2] == b'\r' {
+                body = &body[0..body.len() - 2]; // trim crlf at end of body if there
+            }
             let mut newline_iter = memmem::find_iter(&header, "\r\n");
             let mut last_header_start = 0;
             while let Some(i) = newline_iter.next() {
-                let new_header = body.slice(last_header_start..i);
+                let new_header = &header[last_header_start..i];
                 last_header_start = i + 2;
                 if let Some(colon_i) = memmem::find(&new_header, b": ") {
-                    let name_b = new_header.slice(0..colon_i);
+                    let name_b = &new_header[0..colon_i];
                     let name = String::from_utf8_lossy(&name_b);
-                    let value = new_header.slice(colon_i + 2..);
+                    let value = &new_header[colon_i + 2..];
                     match name.to_lowercase().as_str() {
                         "content-type" => {
                             content_type = Some(String::from_utf8_lossy(&value).to_string());
@@ -267,9 +271,7 @@ fn get_multiparts_entries_from_bytes(
                 let current_body = &body[last_bound..bound];
                 last_bound = bound + boundary_marker.len();
                 //FIXME: make this use bytes
-                if let Ok(entry) =
-                    MultiPartFormEntry::from_str(&String::from_utf8_lossy(current_body))
-                {
+                if let Ok(entry) = MultiPartFormEntry::from_bytes(current_body) {
                     entries.insert(entry.name.clone(), entry);
                 }
             }
@@ -638,8 +640,8 @@ mod tests {
 
     #[test]
     fn multipart_form() {
-        let field1 = MultiPartFormEntry::name_value("field1", "value1\r\n");
-        let field2 = MultiPartFormEntry::file("field2", "example.txt", "value2\r\n");
+        let field1 = MultiPartFormEntry::name_value("field1", "value1");
+        let field2 = MultiPartFormEntry::file("field2", "example.txt", "value2");
         let mut map = HashMap::new();
         map.insert(field1.name.clone(), field1);
         map.insert(field2.name.clone(), field2);
@@ -693,8 +695,8 @@ mod tests {
             -----------------------------29530443417665942004115353768--";
         let entries = get_multiparts_entries_from_str(body, boundary).expect("Error parsing body");
         let expected = vec![
-            MultiPartFormEntry::name_value("fname", "John\r\n"),
-            MultiPartFormEntry::name_value("lname", "Doe\r\n"),
+            MultiPartFormEntry::name_value("fname", "John"),
+            MultiPartFormEntry::name_value("lname", "Doe"),
         ];
     }
 
