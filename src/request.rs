@@ -114,7 +114,6 @@ impl MultiPartFormEntry {
     }
 
     pub fn from_bytes(form: &[u8]) -> Result<MultiPartFormEntry, anyhow::Error> {
-        log::debug!("Processing multipart form");
         //first split out body
         if let Some(blank_line) = memmem::find(&form, b"\r\n\r\n") {
             let mut form_args: HashMap<String, String> = HashMap::new();
@@ -558,13 +557,11 @@ impl Request {
                                     return Ok(req);
                                 }
                                 Err(_) => {
-                                    log::debug!("Waiting On Body");
                                     return Err(Error::WaitingOnBody);
                                 }
                             }
                         }
                         Err(e) => {
-                            log::debug!("Error Parsing Boundary: {}", e.to_string());
                             return Err(Error::MissingMultiPartBoundary);
                         }
                     },
