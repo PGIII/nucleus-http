@@ -116,12 +116,10 @@ where
                     stream: Box::new(tokio_rustls::TlsStream::Server(s)),
                     virtual_hosts: self.virtual_hosts(),
                 }),
-                Err(_) => {
-                    Err(tokio::io::Error::new(
-                        tokio::io::ErrorKind::Other,
-                        "Error Accepting TLS Stream",
-                    ))
-                }
+                Err(_) => Err(tokio::io::Error::new(
+                    tokio::io::ErrorKind::Other,
+                    "Error Accepting TLS Stream",
+                )),
             }
         } else {
             Ok(Connection {
@@ -173,17 +171,22 @@ where
                                                     error.to_string()
                                                 );
                                             } else {
-                                                //clear buffer and shrink incase it grew
-                                                request_bytes.resize(1024, 0);
+                                                //clear buffer
                                                 request_bytes.clear();
                                             }
                                             drop(r);
                                         }
                                         Err(e) => match e {
                                             request::Error::InvalidString
-                                            | request::Error::MissingBlankLine
-                                            | request::Error::WaitingOnBody => {
-                                                //Parital response keep reading
+                                            | request::Error::MissingBlankLine => {}
+                                            request::Error::WaitingOnBody(pb) => {
+                                                if let Some(bytes_left) = pb {
+                                                    let free_bytes = request_bytes.capacity() - request_bytes.len();
+                                                    if free_bytes < bytes_left {
+                                                        // we know body size preallocate for it
+                                                        request_bytes.reserve(bytes_left - free_bytes);
+                                                    }
+                                                }
                                             }
                                             _ => {
                                                 let error_res = format!("400 bad request: {}", e);

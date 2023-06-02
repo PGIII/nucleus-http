@@ -181,7 +181,7 @@ impl CookieConfig {
                             }
                         }
                         Err(e) => {
-                            log::warn!("Cookie Serilaztion Error: {}", e.to_string());
+                            log::warn!("Cookie Serialaztion Error: {}", e.to_string());
                         }
                     }
                 } else {

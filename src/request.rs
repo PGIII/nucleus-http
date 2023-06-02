@@ -31,7 +31,7 @@ pub enum Error {
     MissingBlankLine,
     NoHostHeader,
     InvalidContentLength,
-    WaitingOnBody,
+    WaitingOnBody(Option<usize>), // this can return number of bytes left in body
     MissingMultiPartBoundary,
     MissingContentLength,
 }
@@ -50,7 +50,7 @@ impl From<&Error> for String {
             Error::InvalidMethod => "Invalid Method Requested".to_string(),
             Error::InvalidHTTPVersion => "Unsupported HTTP version Request".to_string(),
             Error::MissingBlankLine => "Missing Blank Line".to_string(),
-            Error::WaitingOnBody => "Waiting On Body".to_string(),
+            Error::WaitingOnBody(_) => "Waiting On Body".to_string(),
             Error::InvalidContentLength => "Content Length Invalid".to_string(),
             Error::MissingMultiPartBoundary => "Missing Mulipart boundary".to_string(),
             Error::MissingContentLength => "Missing Content Length Header".to_string(),
@@ -444,7 +444,7 @@ impl Request {
                 if let Some(content_length) = Self::header_value(&headers, "Content-Length") {
                     if let Ok(len) = content_length.parse() {
                         if req_body.len() < len {
-                            return Err(Error::WaitingOnBody);
+                            return Err(Error::WaitingOnBody(Some(len - req_body.len())));
                         }
                     } else {
                         return Err(Error::InvalidContentLength);
@@ -465,7 +465,7 @@ impl Request {
                                                               //return Ok(req);
                                         }
                                         Err(_) => {
-                                            return Err(Error::WaitingOnBody);
+                                            return Err(Error::WaitingOnBody(None));
                                         }
                                     }
                                 }
