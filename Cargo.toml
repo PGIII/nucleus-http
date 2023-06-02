@@ -5,6 +5,7 @@ edition = "2021"
 
 [profile.release]
 debug = 1
+lto = true
 
 [dependencies]
 anyhow = "1.0.71"
