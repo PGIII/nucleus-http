@@ -10,7 +10,7 @@ pub mod utils;
 pub mod virtual_host;
 
 use bytes::{BufMut, BytesMut};
-use log;
+
 use response::Response;
 use routes::Router;
 use std::{path::Path, sync::Arc};
@@ -45,7 +45,7 @@ pub struct Connection {
 
 impl Connection {
     pub fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>> {
-        return self.virtual_hosts.clone();
+        self.virtual_hosts.clone()
     }
 
     pub async fn write_all(&mut self, src: &[u8]) -> tokio::io::Result<()> {
@@ -98,7 +98,7 @@ where
     }
 
     pub fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>> {
-        return self.virtual_hosts.clone();
+        self.virtual_hosts.clone()
     }
     pub async fn add_virtual_host(&mut self, virtual_host: virtual_host::VirtualHost) {
         let virtual_hosts = self.virtual_hosts();
@@ -117,18 +117,18 @@ where
                     virtual_hosts: self.virtual_hosts(),
                 }),
                 Err(_) => {
-                    return Err(tokio::io::Error::new(
+                    Err(tokio::io::Error::new(
                         tokio::io::ErrorKind::Other,
                         "Error Accepting TLS Stream",
-                    ));
+                    ))
                 }
             }
         } else {
-            return Ok(Connection {
+            Ok(Connection {
                 client_ip,
                 stream: Box::new(stream),
                 virtual_hosts: self.virtual_hosts(),
-            });
+            })
         }
     }
 

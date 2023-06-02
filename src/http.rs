@@ -83,21 +83,21 @@ pub trait IntoHeader {
 
 impl IntoHeader for Header {
     fn into_header(&self) -> Header {
-        return self.clone();
+        self.clone()
     }
 }
 
 impl IntoHeader for (&str, &str) {
     fn into_header(&self) -> Header {
         let (key, value) = self;
-        return Header::new(key, value);
+        Header::new(key, value)
     }
 }
 
 impl IntoHeader for (&str, &String) {
     fn into_header(&self) -> Header {
         let (key, value) = self;
-        return Header::new(key, value);
+        Header::new(key, value)
     }
 }
 
@@ -126,7 +126,7 @@ impl From<&MimeType> for String {
 
 impl From<MimeType> for String {
     fn from(mime: MimeType) -> String {
-        return String::from(&mime);
+        String::from(&mime)
     }
 }
 
@@ -135,7 +135,7 @@ impl From<PathBuf> for MimeType {
         if let Some(ext) = value.extension() {
             return MimeType::from_extension(&ext.to_string_lossy());
         } else {
-            return MimeType::PlainText;
+            MimeType::PlainText
         }
     }
 }
@@ -163,9 +163,7 @@ impl MimeType {
     }
 
     pub fn boundary(&self) -> Option<&str> {
-        match self {
-            _ => None,
-        }
+        None
     }
 
     pub fn from_extension(extension: &str) -> Self {
@@ -190,7 +188,7 @@ impl TryFrom<String> for Header {
         if split.len() == 2 {
             let key = split[0].to_lowercase();
             let value = split[1].to_string();
-            return Ok(Self { key, value });
+            Ok(Self { key, value })
         } else if split.len() > 2 {
             Err("Too many ': '")
         } else {
@@ -206,7 +204,7 @@ impl TryFrom<&String> for Header {
         if split.len() == 2 {
             let key = split[0].to_lowercase();
             let value = split[1].to_string();
-            return Ok(Self { key, value });
+            Ok(Self { key, value })
         } else if split.len() > 2 {
             Err("Too many ': '")
         } else {
@@ -222,7 +220,7 @@ impl TryFrom<&str> for Header {
         if split.len() == 2 {
             let key = split[0].to_lowercase();
             let value = split[1].to_string();
-            return Ok(Self { key, value });
+            Ok(Self { key, value })
         } else if split.len() > 2 {
             Err("Too many ': '")
         } else {
@@ -248,13 +246,13 @@ impl TryFrom<&[u8]> for Header {
 
 impl From<&Header> for String {
     fn from(header: &Header) -> String {
-        return format!("{}: {}", header.key, header.value);
+        format!("{}: {}", header.key, header.value)
     }
 }
 
 impl From<Header> for String {
     fn from(header: Header) -> String {
-        return format!("{}: {}", header.key, header.value);
+        format!("{}: {}", header.key, header.value)
     }
 }
 
@@ -269,10 +267,10 @@ impl Header {
     pub fn new_server() -> Vec<Header> {
         const VERSION: &str = env!("CARGO_PKG_VERSION");
         const NAME: &str = env!("CARGO_PKG_NAME");
-        return vec![Header {
+        vec![Header {
             key: "Server".to_string(),
-            value: format!("{NAME} {VERSION}").to_string(),
-        }];
+            value: format!("{NAME} {VERSION}"),
+        }]
     }
 }
 
@@ -299,7 +297,7 @@ impl From<StatusCode> for &str {
 impl From<StatusCode> for String {
     fn from(status: StatusCode) -> String {
         let status_str: &str = status.into();
-        return status_str.to_owned();
+        status_str.to_owned()
     }
 }
 
@@ -327,6 +325,6 @@ impl From<Version> for &str {
 
 impl From<Version> for String {
     fn from(version: Version) -> String {
-        return version.to_string();
+        version.to_string()
     }
 }

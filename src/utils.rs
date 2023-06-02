@@ -13,8 +13,8 @@ pub fn generate_random_secret() -> SecretString {
 }
 
 pub fn base64_encode(original: Vec<u8>) -> String {
-    let encoded = general_purpose::STANDARD_NO_PAD.encode(original);
-    encoded
+    
+    general_purpose::STANDARD_NO_PAD.encode(original)
 }
 
 pub fn base64_decode(encoded: String) -> Result<Vec<u8>, anyhow::Error> {

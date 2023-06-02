@@ -3,7 +3,7 @@ use memchr::{memchr, memchr_iter, memmem};
 
 use crate::http::{Header, Method, Version};
 use core::fmt;
-use std::{collections::HashMap, format, println, vec};
+use std::{collections::HashMap, format, vec};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FormTypes {
@@ -70,24 +70,24 @@ impl MultiPartFormEntry {
     pub fn from_str(form_str: &str) -> Result<MultiPartFormEntry, anyhow::Error> {
         //first split out body
         let split: Vec<_> = form_str.split("\r\n\r\n").collect();
-        if let (Some(header), Some(body)) = (split.get(0), split.get(1)) {
-            let mut lines = header.split("\r\n");
+        if let (Some(header), Some(body)) = (split.first(), split.get(1)) {
+            let lines = header.split("\r\n");
             let mut form_args: HashMap<&str, &str> = HashMap::new();
             let mut content_type = None;
-            while let Some(line) = lines.next() {
+            for line in lines {
                 let name_value_split: Vec<_> = line.split(": ").collect();
                 if let (Some(header_name), Some(header_value)) =
-                    (name_value_split.get(0), name_value_split.get(1))
+                    (name_value_split.first(), name_value_split.get(1))
                 {
                     match header_name.to_lowercase().as_str() {
                         "content-type" => {
                             content_type = Some(header_value.to_string());
                         }
                         "content-disposition" => {
-                            let mut split = header_value.split("; ");
-                            while let Some(op) = split.next() {
-                                let nv: Vec<_> = op.split("=").collect();
-                                if let (Some(n), Some(v)) = (nv.get(0), nv.get(1)) {
+                            let split = header_value.split("; ");
+                            for op in split {
+                                let nv: Vec<_> = op.split('=').collect();
+                                if let (Some(n), Some(v)) = (nv.first(), nv.get(1)) {
                                     form_args.insert(n, strip_quotes(v));
                                 }
                             }
@@ -115,7 +115,7 @@ impl MultiPartFormEntry {
 
     pub fn from_bytes(form: &[u8]) -> Result<MultiPartFormEntry, anyhow::Error> {
         //first split out body
-        if let Some(blank_line) = memmem::find(&form, b"\r\n\r\n") {
+        if let Some(blank_line) = memmem::find(form, b"\r\n\r\n") {
             let mut form_args: HashMap<String, String> = HashMap::new();
             let mut content_type = None;
             let header = &form[0..blank_line + 2];
@@ -123,25 +123,25 @@ impl MultiPartFormEntry {
             if body[body.len() - 1] == b'\n' && body[body.len() - 2] == b'\r' {
                 body = &body[0..body.len() - 2]; // trim crlf at end of body if there
             }
-            let mut newline_iter = memmem::find_iter(&header, "\r\n");
+            let newline_iter = memmem::find_iter(header, "\r\n");
             let mut last_header_start = 0;
-            while let Some(i) = newline_iter.next() {
+            for i in newline_iter {
                 let new_header = &header[last_header_start..i];
                 last_header_start = i + 2;
-                if let Some(colon_i) = memmem::find(&new_header, b": ") {
+                if let Some(colon_i) = memmem::find(new_header, b": ") {
                     let name_b = &new_header[0..colon_i];
-                    let name = String::from_utf8_lossy(&name_b);
+                    let name = String::from_utf8_lossy(name_b);
                     let value = &new_header[colon_i + 2..];
                     match name.to_lowercase().as_str() {
                         "content-type" => {
-                            content_type = Some(String::from_utf8_lossy(&value).to_string());
+                            content_type = Some(String::from_utf8_lossy(value).to_string());
                         }
                         "content-disposition" => {
-                            let header_value = String::from_utf8_lossy(&value).to_string();
-                            let mut split = header_value.split("; ");
-                            while let Some(op) = split.next() {
-                                let nv: Vec<_> = op.split("=").collect();
-                                if let (Some(n), Some(v)) = (nv.get(0), nv.get(1)) {
+                            let header_value = String::from_utf8_lossy(value).to_string();
+                            let split = header_value.split("; ");
+                            for op in split {
+                                let nv: Vec<_> = op.split('=').collect();
+                                if let (Some(n), Some(v)) = (nv.first(), nv.get(1)) {
                                     form_args.insert(n.to_string(), strip_quotes(v).to_string());
                                 }
                             }
@@ -213,10 +213,10 @@ impl From<Error> for String {
     }
 }
 
-fn get_boundary<'a>(content_type_value_str: &'a str) -> Result<&'a str, anyhow::Error> {
-    let parts: Vec<_> = content_type_value_str.split(";").collect();
+fn get_boundary(content_type_value_str: &str) -> Result<&str, anyhow::Error> {
+    let parts: Vec<_> = content_type_value_str.split(';').collect();
     if parts.len() > 1 {
-        let nv: Vec<_> = parts[1].split("=").collect();
+        let nv: Vec<_> = parts[1].split('=').collect();
         if let Some(boundary) = nv.get(1) {
             Ok(strip_quotes(boundary))
         } else {
@@ -242,12 +242,12 @@ fn get_multiparts_entries_from_str(
                     entries.insert(entry.name.clone(), entry);
                 }
             }
-            return Ok(entries);
+            Ok(entries)
         } else {
-            return Err(anyhow::Error::msg("Data after end marker"));
+            Err(anyhow::Error::msg("Data after end marker"))
         }
     } else {
-        return Err(anyhow::Error::msg("Not Full Body"));
+        Err(anyhow::Error::msg("Not Full Body"))
     }
 }
 
@@ -259,14 +259,14 @@ fn get_multiparts_entries_from_bytes(
     end_marker.extend_from_slice(boundary);
     let boundary_marker = end_marker.clone();
     end_marker.extend_from_slice(b"--");
-    if let Some(_) = memmem::find(body, &end_marker) {
+    if memmem::find(body, &end_marker).is_some() {
         //we have an en marker go through the bodies, body is anything after marker before next
         //marker or end boundary
-        let mut body_spliter = memmem::find_iter(&body, &boundary_marker);
+        let mut body_spliter = memmem::find_iter(body, &boundary_marker);
         let mut entries = HashMap::new();
         if let Some(mut last_bound) = body_spliter.next() {
-            last_bound = last_bound + boundary_marker.len();
-            while let Some(bound) = body_spliter.next() {
+            last_bound += boundary_marker.len();
+            for bound in body_spliter {
                 let current_body = &body[last_bound..bound];
                 last_bound = bound + boundary_marker.len();
                 //FIXME: make this use bytes
@@ -277,18 +277,18 @@ fn get_multiparts_entries_from_bytes(
         } else {
             return Err(anyhow::Error::msg("Missing boundaries"));
         }
-        return Ok(entries);
+        Ok(entries)
     } else {
-        return Err(anyhow::Error::msg("Not Full Body"));
+        Err(anyhow::Error::msg("Not Full Body"))
     }
 }
 
 fn strip_quotes(value: &str) -> &str {
-    let split: Vec<_> = value.split("\"").collect();
+    let split: Vec<_> = value.split('\"').collect();
     if let Some(v) = split.get(1) {
-        return v;
+        v
     } else {
-        return split[0];
+        split[0]
     }
 }
 
@@ -303,7 +303,7 @@ impl Request {
     }
 
     pub fn error(&self, code: u32, message: &str) -> String {
-        return format!("{} {} {}\r\n", self.version.to_string(), code, message);
+        format!("{} {} {}\r\n", self.version.to_string(), code, message)
     }
 
     pub fn method(&self) -> &Method {
@@ -328,7 +328,7 @@ impl Request {
 
     pub fn get_header_value(&self, header_name: &str) -> Option<String> {
         let lower = header_name.to_lowercase();
-        return Self::header_value(&self.headers, &lower);
+        Self::header_value(&self.headers, &lower)
     }
 
     pub fn header_value(headers: &HashMap<String, String>, header_name: &str) -> Option<String> {
@@ -336,17 +336,17 @@ impl Request {
         return headers.get(&lower).cloned();
     }
 
-    pub fn from_lines<'a>(lines: &Vec<&'a str>) -> Result<Request, Error> {
+    pub fn from_lines(lines: &Vec<&str>) -> Result<Request, Error> {
         let method;
         let version;
-        let path;
+        
         let mut headers = HashMap::new();
         let host;
         let mut query_string = None;
         let body = vec![];
         let form_data = FormTypes::None;
 
-        let request_seperated: Vec<&str> = lines[0].split(" ").collect(); //First line is request
+        let request_seperated: Vec<&str> = lines[0].split(' ').collect(); //First line is request
         if request_seperated.len() < 3 {
             return Err(Error::InvalidString);
         }
@@ -361,7 +361,7 @@ impl Request {
         //second string is url
         let url = request_seperated[1].to_string();
         let url_split: Vec<&str> = url.split('?').collect(); //anything after ? is query string
-        path = url_split[0].to_string();
+        let path = url_split[0].to_string();
         if url_split.len() > 1 {
             query_string = Some(url_split[1].to_string());
         }
@@ -388,14 +388,14 @@ impl Request {
         let op_host = Self::header_value(&headers, "Host");
         if let Some(hostname) = op_host {
             // get rid if port if its included in host name
-            let hostname_only: Vec<&str> = hostname.split(":").collect();
+            let hostname_only: Vec<&str> = hostname.split(':').collect();
             host = hostname_only[0].to_string();
         } else {
             //FIXME: should we only error when its > http 1.0????
             return Err(Error::NoHostHeader);
         }
         //last is optional headers
-        return Ok(Request {
+        Ok(Request {
             method,
             version,
             path,
@@ -404,12 +404,12 @@ impl Request {
             query_string,
             body,
             form_data,
-        });
+        })
     }
 
     pub fn from_bytes(request_bytes: Bytes) -> Result<Request, Error> {
-        let bytes = Bytes::from(request_bytes);
-        if bytes.len() == 0 {
+        let bytes = request_bytes;
+        if bytes.is_empty() {
             return Err(Error::InvalidString);
         }
         //first split the header from the body, first \r\n\r\n should seperate that
@@ -419,8 +419,8 @@ impl Request {
             let mut req_body = bytes.slice(blank_line_index + 4..bytes.len());
             let mut req_header_lines = memmem::find_iter(&req_header, "\r\n");
             if let Some(i) = req_header_lines.next() {
-                let method: Method;
-                let version;
+                
+                
                 let url;
                 let mut headers = HashMap::new();
                 let host;
@@ -435,8 +435,8 @@ impl Request {
                 let url_b = request_line.slice(method_end + 1..url_end);
                 let version_b = request_line.slice(url_end + 1..request_line.len());
 
-                method = Method::try_from(method_b.as_ref()).map_err(|_| Error::InvalidMethod)?;
-                version =
+                let method: Method = Method::try_from(method_b.as_ref()).map_err(|_| Error::InvalidMethod)?;
+                let version =
                     Version::try_from(version_b.as_ref()).map_err(|_| Error::InvalidHTTPVersion)?;
                 //check for query_string in url
                 if let Some(qmark) = memchr(b'?', &url_b) {
@@ -449,7 +449,7 @@ impl Request {
                 }
 
                 // go through rest of the lines in header and parse out any headers
-                while let Some(line_end) = req_header_lines.next() {
+                for line_end in req_header_lines {
                     let header_line = req_header.slice(header_start..line_end);
                     header_start = line_end + 2;
                     if let Ok(header) = Header::try_from(header_line.as_ref()) {
@@ -461,7 +461,7 @@ impl Request {
                 let op_host = Self::header_value(&headers, "Host");
                 if let Some(hostname) = op_host {
                     // get rid if port if its included in host name
-                    let hostname_only: Vec<&str> = hostname.split(":").collect();
+                    let hostname_only: Vec<&str> = hostname.split(':').collect();
                     host = hostname_only[0].to_string();
                 } else {
                     //FIXME: should we only error when its > http 1.0????
@@ -509,7 +509,7 @@ impl Request {
                         _ => {}
                     }
                 }
-                return Ok(Request {
+                Ok(Request {
                     method,
                     version,
                     path: url,
@@ -518,13 +518,13 @@ impl Request {
                     query_string,
                     body: req_body.to_vec(),
                     form_data,
-                });
+                })
             } else {
                 //no headers, we need at least the host header
                 panic!("request parsing: Somehow missing CRLF even though CRLFCRLF was present");
             }
         } else {
-            return Err(Error::MissingBlankLine);
+            Err(Error::MissingBlankLine)
         }
     }
 

@@ -15,7 +15,7 @@ where
 {
     fn from_request(state: State<S>, _request: Request) -> Self {
         let State(inner_state) = state;
-        return inner_state;
+        inner_state
     }
 }
 

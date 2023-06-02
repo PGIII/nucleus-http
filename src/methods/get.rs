@@ -27,7 +27,7 @@ pub async fn handle(r: &request::Request) -> String {
 
     let length = body.len();
     let response = format!("{status}Content-Length: {length}\r\n\r\n{body}");
-    return response;
+    response
 }
 
 pub async fn load_file(r: &request::Request, file_path: &str) -> String {
@@ -40,11 +40,11 @@ pub async fn load_file(r: &request::Request, file_path: &str) -> String {
         body = "file Not found".to_owned();
         status = r.error(404, "Not Found");
     }
-    return response(body, status);
+    response(body, status)
 }
 
 pub fn response(body: String, status: String) -> String {
     let length = body.len();
     let response = format!("{status}Content-Length: {length}\r\n\r\n{body}");
-    return response;
+    response
 }

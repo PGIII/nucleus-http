@@ -77,9 +77,9 @@ use std::{
         }
       });
       
-      return Worker {
+      Worker {
          id, 
          thread: Some(thread) 
-        };
+        }
     }   
   }

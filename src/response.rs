@@ -80,7 +80,7 @@ impl Response {
         for byte in &self.body {
             buffer.push(*byte);
         }
-        return buffer;
+        buffer
     }
 
     pub fn add_header(&mut self, value: impl IntoHeader) {
@@ -136,7 +136,7 @@ impl From<&str> for Response {
 impl From<anyhow::Error> for Response {
     fn from(value: anyhow::Error) -> Self {
         log::error!("500: {}", value);
-       let message = format!("<h1>Error 500 Internal Server Error</h1>\r\n"); 
+       let message = "<h1>Error 500 Internal Server Error</h1>\r\n".to_string(); 
         Response {
             status: StatusCode::ErrInternalServer, //FIXME: make this smarter
             body: message.into(),
@@ -174,7 +174,7 @@ impl From<Response> for String {
             {headers_string}\r\n\
             {body}"
         );
-        return response;
+        response
     }
 }
 

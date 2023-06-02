@@ -78,7 +78,7 @@ where
     }
 
     pub fn routes(&self) -> Routes<S> {
-        return Arc::clone(&self.routes);
+        Arc::clone(&self.routes)
     }
 
     pub fn new_routes() -> Routes<S> {
@@ -102,8 +102,8 @@ where
             // go through ancestors appending * on the end and see if we have any matches
             let path = Path::new(request.path());
             if let Some(parent) = path.parent() {
-                let mut ancestors = parent.ancestors();
-                while let Some(a) = ancestors.next() {
+                let ancestors = parent.ancestors();
+                for a in ancestors {
                     if let Some(globed) = a.join("*").to_str() {
                         if let Some(route) = routes_locked.get(globed) {
                             matching_route = Some(route);
@@ -160,29 +160,28 @@ where
         }
 
         //no route try static serve
-        let response = Response::error(http::StatusCode::ErrNotFound, "File Not Found".into());
-        return response;
+        
+        Response::error(http::StatusCode::ErrNotFound, "File Not Found".into())
     }
 
     async fn get_file(path: PathBuf) -> Response {
         match tokio::fs::read(&path).await {
             Ok(contents) => {
                 let mime: MimeType = path.into();
-                let response = Response::new(http::StatusCode::OK, contents, mime);
-                return response;
+                
+                Response::new(http::StatusCode::OK, contents, mime)
             }
             Err(err) => match err.kind() {
                 std::io::ErrorKind::PermissionDenied => {
-                    let response =
-                        Response::error(http::StatusCode::ErrForbidden, "Permission Denied".into());
-                    return response;
+                    
+                    Response::error(http::StatusCode::ErrForbidden, "Permission Denied".into())
                 }
                 std::io::ErrorKind::NotFound | _ => {
-                    let response = Response::error(
+                    
+                    Response::error(
                         http::StatusCode::ErrNotFound,
                         "Static File Not Found".into(),
-                    );
-                    return response;
+                    )
                 }
             },
         }
@@ -193,7 +192,7 @@ where
                 return Some(vhost.root_dir().to_path_buf());
             }
         }
-        return None;
+        None
     }
 }
 
@@ -254,15 +253,15 @@ where
     }
 
     pub fn method(&self) -> &Method {
-        return &self.method;
+        &self.method
     }
 
     pub fn resolver(&self) -> &RouteResolver<S> {
-        return &self.resolver;
+        &self.resolver
     }
 
     pub fn path(&self) -> &str {
-        return &self.path;
+        &self.path
     }
 
     ///FIXME: this should be a little more robust and look for wild cards only if not route is
@@ -277,9 +276,9 @@ where
         // Check for exact match or if route is wild card
         let request_path = request.path();
         let route_path = self.path();
-        let path_match = request_path == route_path || route_path == "*";
+        
 
-        return path_match;
+        request_path == route_path || route_path == "*"
     }
 }
 

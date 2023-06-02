@@ -116,20 +116,20 @@ impl CookieConfig {
         let mut mac = HmacSha256::new_from_slice(self.secret.expose_secret().as_bytes())
             .context("Error Creating Signature Hash")?;
         mac.update(payload.value.as_bytes());
-        Ok(mac
+        mac
             .verify_slice(&payload.signature)
-            .context("Invalid Signature")?)
+            .context("Invalid Signature")
     }
 
     pub fn cookies_from_str(&self, value: &str) -> Result<HashMap<String, Cookie>, anyhow::Error> {
         let values: Vec<_> = value.split("; ").collect();
-        let mut iterator = values.into_iter();
+        let iterator = values.into_iter();
         let mut config = self.clone();
         let mut map = HashMap::new();
         let mut raw_cookie_list = vec![];
 
-        while let Some(item) = iterator.next() {
-            let split: Vec<_> = item.split("=").collect();
+        for item in iterator {
+            let split: Vec<_> = item.split('=').collect();
             let n = split[0];
             match n {
                 "Secure" => {
