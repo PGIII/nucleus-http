@@ -78,24 +78,24 @@ pub struct Header {
 }
 
 pub trait IntoHeader {
-    fn into_header(&self) -> Header;
+    fn into_header(self) -> Header;
 }
 
 impl IntoHeader for Header {
-    fn into_header(&self) -> Header {
-        self.clone()
+    fn into_header(self) -> Header {
+        self
     }
 }
 
 impl IntoHeader for (&str, &str) {
-    fn into_header(&self) -> Header {
+    fn into_header(self) -> Header {
         let (key, value) = self;
         Header::new(key, value)
     }
 }
 
 impl IntoHeader for (&str, &String) {
-    fn into_header(&self) -> Header {
+    fn into_header(self) -> Header {
         let (key, value) = self;
         Header::new(key, value)
     }
@@ -185,14 +185,14 @@ impl TryFrom<String> for Header {
     type Error = &'static str;
     fn try_from(string: String) -> Result<Self, Self::Error> {
         let split: Vec<&str> = string.split(": ").collect();
-        if split.len() == 2 {
-            let key = split[0].to_lowercase();
-            let value = split[1].to_string();
-            Ok(Self { key, value })
-        } else if split.len() > 2 {
-            Err("Too many ': '")
-        } else {
-            Err("Invalid Key Value Pair")
+        match split.len().cmp(&2) {
+            std::cmp::Ordering::Equal => {
+                let key = split[0].to_lowercase();
+                let value = split[1].to_string();
+                Ok(Self { key, value })
+            }
+            std::cmp::Ordering::Greater => Err("Too many ': '"),
+            std::cmp::Ordering::Less => Err("Invalid Key Value Pair"),
         }
     }
 }
@@ -201,14 +201,14 @@ impl TryFrom<&String> for Header {
     type Error = &'static str;
     fn try_from(string: &String) -> Result<Self, Self::Error> {
         let split: Vec<&str> = string.split(": ").collect();
-        if split.len() == 2 {
-            let key = split[0].to_lowercase();
-            let value = split[1].to_string();
-            Ok(Self { key, value })
-        } else if split.len() > 2 {
-            Err("Too many ': '")
-        } else {
-            Err("Invalid Key Value Pair")
+        match split.len().cmp(&2) {
+            std::cmp::Ordering::Equal => {
+                let key = split[0].to_lowercase();
+                let value = split[1].to_string();
+                Ok(Self { key, value })
+            }
+            std::cmp::Ordering::Greater => Err("Too many ': '"),
+            std::cmp::Ordering::Less => Err("Invalid Key Value Pair"),
         }
     }
 }
@@ -217,14 +217,14 @@ impl TryFrom<&str> for Header {
     type Error = &'static str;
     fn try_from(string: &str) -> Result<Self, Self::Error> {
         let split: Vec<&str> = string.split(": ").collect();
-        if split.len() == 2 {
-            let key = split[0].to_lowercase();
-            let value = split[1].to_string();
-            Ok(Self { key, value })
-        } else if split.len() > 2 {
-            Err("Too many ': '")
-        } else {
-            Err("Invalid Key Value Pair")
+        match split.len().cmp(&2) {
+            std::cmp::Ordering::Equal => {
+                let key = split[0].to_lowercase();
+                let value = split[1].to_string();
+                Ok(Self { key, value })
+            }
+            std::cmp::Ordering::Greater => Err("Too many ': '"),
+            std::cmp::Ordering::Less => Err("Invalid Key Value Pair"),
         }
     }
 }
@@ -301,14 +301,15 @@ impl From<StatusCode> for String {
     }
 }
 
-impl Version {
-    pub fn to_string(&self) -> String {
-        match self {
-            Version::V0_9 => "".to_owned(),
-            Version::V1_0 => "HTTP/1.0".to_owned(),
-            Version::V1_1 => "HTTP/1.1".to_owned(),
-            Version::V2_0 => "HTTP/2".to_owned(),
-        }
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Version::V0_9 => "",
+            Version::V1_0 => "HTTP/1.0",
+            Version::V1_1 => "HTTP/1.1",
+            Version::V2_0 => "HTTP/2",
+        };
+        write!(f, "{}", s)
     }
 }
 

@@ -67,7 +67,7 @@ pub struct MultiPartFormEntry {
 }
 
 impl MultiPartFormEntry {
-    pub fn from_str(form_str: &str) -> Result<MultiPartFormEntry, anyhow::Error> {
+    pub fn from_string(form_str: &str) -> Result<MultiPartFormEntry, anyhow::Error> {
         //first split out body
         let split: Vec<_> = form_str.split("\r\n\r\n").collect();
         if let (Some(header), Some(body)) = (split.first(), split.get(1)) {
@@ -227,30 +227,6 @@ fn get_boundary(content_type_value_str: &str) -> Result<&str, anyhow::Error> {
     }
 }
 
-fn get_multiparts_entries_from_str(
-    body: &str,
-    boundary: &str,
-) -> anyhow::Result<HashMap<String, MultiPartFormEntry>> {
-    let end_marker = format!("--{}--", boundary);
-    let boundary_marker = format!("--{}", boundary);
-    if body.contains(&end_marker) {
-        let bodies: Vec<_> = body.split(&boundary_marker).collect();
-        let mut entries = HashMap::new();
-        if bodies[bodies.len() - 1] == "--" {
-            for m_body in bodies {
-                if let Ok(entry) = MultiPartFormEntry::from_str(m_body) {
-                    entries.insert(entry.name.clone(), entry);
-                }
-            }
-            Ok(entries)
-        } else {
-            Err(anyhow::Error::msg("Data after end marker"))
-        }
-    } else {
-        Err(anyhow::Error::msg("Not Full Body"))
-    }
-}
-
 fn get_multiparts_entries_from_bytes(
     body: &[u8],
     boundary: &[u8],
@@ -303,7 +279,7 @@ impl Request {
     }
 
     pub fn error(&self, code: u32, message: &str) -> String {
-        format!("{} {} {}\r\n", self.version.to_string(), code, message)
+        format!("{} {} {}\r\n", self.version, code, message)
     }
 
     pub fn method(&self) -> &Method {
@@ -337,9 +313,6 @@ impl Request {
     }
 
     pub fn from_lines(lines: &Vec<&str>) -> Result<Request, Error> {
-        let method;
-        let version;
-        
         let mut headers = HashMap::new();
         let host;
         let mut query_string = None;
@@ -352,11 +325,11 @@ impl Request {
         }
 
         //First is method
-        match request_seperated[0] {
-            "GET" => method = Method::GET,
-            "POST" => method = Method::POST,
+        let method = match request_seperated[0] {
+            "GET" => Method::GET,
+            "POST" => Method::POST,
             _ => return Err(Error::InvalidMethod),
-        }
+        };
 
         //second string is url
         let url = request_seperated[1].to_string();
@@ -367,18 +340,18 @@ impl Request {
         }
 
         //third is http Verison
-        match request_seperated[2] {
-            "HTTP/1.0" => version = Version::V1_0,
-            "HTTP/1.1" => version = Version::V1_1,
-            "HTTP/2.2" => version = Version::V2_0,
+        let version = match request_seperated[2] {
+            "HTTP/1.0" => Version::V1_0,
+            "HTTP/1.1" => Version::V1_1,
+            "HTTP/2.2" => Version::V2_0,
             _ => return Err(Error::InvalidHTTPVersion),
-        }
+        };
 
         //4th is optional headers
         if lines.len() > 1 {
             //FIXME: Dont we need to collect here?
-            for i in 1..lines.len() {
-                if let Ok(header) = Header::try_from(lines[i]) {
+            for line in lines.iter().skip(1) {
+                if let Ok(header) = Header::try_from(*line) {
                     headers.insert(header.key, header.value);
                 }
                 //headers.push(lines[i].to_string());
@@ -419,8 +392,6 @@ impl Request {
             let mut req_body = bytes.slice(blank_line_index + 4..bytes.len());
             let mut req_header_lines = memmem::find_iter(&req_header, "\r\n");
             if let Some(i) = req_header_lines.next() {
-                
-                
                 let url;
                 let mut headers = HashMap::new();
                 let host;
@@ -435,7 +406,8 @@ impl Request {
                 let url_b = request_line.slice(method_end + 1..url_end);
                 let version_b = request_line.slice(url_end + 1..request_line.len());
 
-                let method: Method = Method::try_from(method_b.as_ref()).map_err(|_| Error::InvalidMethod)?;
+                let method: Method =
+                    Method::try_from(method_b.as_ref()).map_err(|_| Error::InvalidMethod)?;
                 let version =
                     Version::try_from(version_b.as_ref()).map_err(|_| Error::InvalidHTTPVersion)?;
                 //check for query_string in url
@@ -619,25 +591,6 @@ mod tests {
 
         let request = Request::from_bytes(request_str).expect("Could not build request");
         assert_eq!(expected, request);
-    }
-
-    #[test]
-    fn multipart_body_test() {
-        let boundary = "---------------------------29530443417665942004115353768";
-        let body = "-----------------------------29530443417665942004115353768\r\n\
-            Content-Disposition: form-data; name=\"fname\"\r\n\
-            \r\n\
-            John\r\n\
-            -----------------------------29530443417665942004115353768\r\n\
-            Content-Disposition: form-data; name=\"lname\"\r\n\
-            \r\n\
-            Doe\r\n\
-            -----------------------------29530443417665942004115353768--";
-        let entries = get_multiparts_entries_from_str(body, boundary).expect("Error parsing body");
-        let expected = vec![
-            MultiPartFormEntry::name_value("fname", "John"),
-            MultiPartFormEntry::name_value("lname", "Doe"),
-        ];
     }
 
     #[test]

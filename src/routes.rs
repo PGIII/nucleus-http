@@ -6,7 +6,7 @@ use crate::{
     virtual_host::VirtualHost,
 };
 use async_trait::async_trait;
-use enum_map::{EnumMap, enum_map};
+use enum_map::{enum_map, EnumMap};
 use std::{
     collections::HashMap,
     future::Future,
@@ -88,7 +88,11 @@ where
         Arc::new(RwLock::new(map))
     }
 
-    pub async fn route(&self, request: &Request, vhosts: Arc<RwLock<Vec<VirtualHost>>>) -> Response {
+    pub async fn route(
+        &self,
+        request: &Request,
+        vhosts: Arc<RwLock<Vec<VirtualHost>>>,
+    ) -> Response {
         log::info!("{} Request for: {}", request.method(), request.path());
         let routes = self.routes();
         let routes_locked = &routes.read().await[*request.method()];
@@ -160,7 +164,7 @@ where
         }
 
         //no route try static serve
-        
+
         Response::error(http::StatusCode::ErrNotFound, "File Not Found".into())
     }
 
@@ -168,25 +172,24 @@ where
         match tokio::fs::read(&path).await {
             Ok(contents) => {
                 let mime: MimeType = path.into();
-                
+
                 Response::new(http::StatusCode::OK, contents, mime)
             }
             Err(err) => match err.kind() {
                 std::io::ErrorKind::PermissionDenied => {
-                    
                     Response::error(http::StatusCode::ErrForbidden, "Permission Denied".into())
                 }
-                std::io::ErrorKind::NotFound | _ => {
-                    
-                    Response::error(
-                        http::StatusCode::ErrNotFound,
-                        "Static File Not Found".into(),
-                    )
-                }
+                _ => Response::error(
+                    http::StatusCode::ErrNotFound,
+                    "Static File Not Found".into(),
+                ),
             },
         }
     }
-    async fn get_vhost_dir(request: &Request, vhosts: Arc<RwLock<Vec<VirtualHost>>>) -> Option<PathBuf> {
+    async fn get_vhost_dir(
+        request: &Request,
+        vhosts: Arc<RwLock<Vec<VirtualHost>>>,
+    ) -> Option<PathBuf> {
         for vhost in &*vhosts.read().await {
             if vhost.hostname() == request.hostname() {
                 return Some(vhost.root_dir().to_path_buf());
@@ -276,7 +279,6 @@ where
         // Check for exact match or if route is wild card
         let request_path = request.path();
         let route_path = self.path();
-        
 
         request_path == route_path || route_path == "*"
     }
@@ -291,25 +293,26 @@ mod tests {
     #[tokio::test]
     async fn route_static_file() {
         let request =
-            Request::from_string("GET /index.html HTTP/1.1\r\nHost: localhost\r\n\r\n".to_owned()).unwrap();
+            Request::from_string("GET /index.html HTTP/1.1\r\nHost: localhost\r\n\r\n".to_owned())
+                .unwrap();
         let vhost = VirtualHost::new("localhost", "", "./");
-        let vhosts = Arc::new(RwLock::new(vec![vhost])); 
+        let vhosts = Arc::new(RwLock::new(vec![vhost]));
         let mut router = Router::new(());
         router.add_route(Route::get_static("/", "index.html")).await;
-        
+
         let file = tokio::fs::read_to_string("./index.html").await.unwrap();
         let expected = Response::from(file);
-        assert_eq!(http::StatusCode::OK, expected.status()); 
+        assert_eq!(http::StatusCode::OK, expected.status());
 
         let response = router.route(&request, vhosts.clone()).await;
         assert_eq!(expected, response);
-        
+
         let request =
             Request::from_string("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".to_owned()).unwrap();
         let response = router.route(&request, vhosts.clone()).await;
         assert_eq!(expected, response);
     }
-    
+
     async fn hello(_: (), _: Request) -> Result<String, String> {
         Ok("hello".to_owned())
     }
@@ -319,12 +322,12 @@ mod tests {
         let request =
             Request::from_string("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".to_owned()).unwrap();
         let vhost = VirtualHost::new("localhost", "", "./");
-        let vhosts = Arc::new(RwLock::new(vec![vhost])); 
+        let vhosts = Arc::new(RwLock::new(vec![vhost]));
         let mut router = Router::new(());
         router.add_route(Route::get("/", hello)).await;
-        
+
         let expected = Response::from("hello");
-        assert_eq!(http::StatusCode::OK, expected.status()); 
+        assert_eq!(http::StatusCode::OK, expected.status());
 
         let response = router.route(&request, vhosts.clone()).await;
         assert_eq!(expected, response);
@@ -337,15 +340,16 @@ mod tests {
     #[tokio::test]
     async fn route_dynamic() {
         let vhost = VirtualHost::new("localhost", "", "./");
-        let vhosts = Arc::new(RwLock::new(vec![vhost])); 
+        let vhosts = Arc::new(RwLock::new(vec![vhost]));
         let mut router = Router::new(());
         router.add_route(Route::get("/*", dynamic)).await;
-        
+
         let expected = Response::from("Hello /bob");
-        assert_eq!(http::StatusCode::OK, expected.status()); 
+        assert_eq!(http::StatusCode::OK, expected.status());
 
         let request =
-        Request::from_string("GET /bob HTTP/1.1\r\nHost: localhost\r\n\r\n".to_owned()).unwrap();
+            Request::from_string("GET /bob HTTP/1.1\r\nHost: localhost\r\n\r\n".to_owned())
+                .unwrap();
         let response = router.route(&request, vhosts.clone()).await;
         assert_eq!(expected, response);
     }

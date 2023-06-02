@@ -20,7 +20,7 @@ pub struct CookieConfig {
     secret: SecretString,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Cookie {
     config: CookieConfig,
     name: String,
@@ -84,13 +84,11 @@ impl Cookie {
     }
 }
 
-/// Settings for Cookie, cookies can be built from this
-/// a cookie config will also generate a random key for signing
-impl CookieConfig {
+impl Default for CookieConfig {
     /// Default settings for cookie
     /// defaults are Strict same site, secure, http only, path = /, and no expiration
     /// Note: Domain isnt specifed since that keeps subdomains from having access
-    pub fn default() -> CookieConfig {
+    fn default() -> Self {
         CookieConfig {
             secure: true,
             http_only: true,
@@ -101,7 +99,10 @@ impl CookieConfig {
             secret: utils::generate_random_secret(),
         }
     }
-
+}
+/// Settings for Cookie, cookies can be built from this
+/// a cookie config will also generate a random key for signing
+impl CookieConfig {
     pub fn new_cookie(&self, name: &str, value: &str) -> Cookie {
         Cookie::new_with_config(self, name, value)
     }
@@ -254,7 +255,7 @@ impl CookieConfig {
 }
 
 impl IntoHeader for Cookie {
-    fn into_header(&self) -> crate::http::Header {
+    fn into_header(self) -> crate::http::Header {
         let cookie_value = self.sign();
         let cookie_json =
             serde_json::to_string(&cookie_value).expect("Error Serializing Cookie value"); //FIXME: How should we
@@ -301,7 +302,7 @@ mod tests {
         //let expected = "set-cookie: id=hi; Secure; HttpOnly; SameSite=Strict; Path=/";
         let config = CookieConfig::default();
         let cookie = config.new_cookie("id", "hi");
-        let header = cookie.into_header();
+        let header = cookie.clone().into_header();
         let decoded_coookie = config.cookies_from_header(header).unwrap();
         assert_eq!(&cookie, decoded_coookie.get("id").unwrap());
     }
@@ -310,7 +311,7 @@ mod tests {
     fn cookie_builder() {
         let config = CookieConfig::default();
         let cookie = config.new_cookie("id", "hi");
-        let header = cookie.into_header();
+        let header = cookie.clone().into_header();
         let decoded_cookie = config.cookies_from_header(header).unwrap();
         assert_eq!(&cookie, decoded_cookie.get("id").unwrap());
     }
@@ -319,12 +320,12 @@ mod tests {
     fn cookie_delete() {
         let config = CookieConfig::default();
         let mut cookie = config.new_cookie("id", "hi");
-        let header = cookie.into_header();
+        let header = cookie.clone().into_header();
         let decoded_cookie = config.cookies_from_header(header).unwrap();
         assert_eq!(&cookie, decoded_cookie.get("id").unwrap());
 
         cookie.delete();
-        let header = cookie.into_header();
+        let header = cookie.clone().into_header();
         let decoded_cookie = config.cookies_from_header(header).unwrap();
         assert_eq!(&cookie, decoded_cookie.get("id").unwrap());
     }
@@ -333,7 +334,7 @@ mod tests {
     fn other_cookies() {
         let config = CookieConfig::default();
         let cookie = config.new_cookie("id", "hi");
-        let header = cookie.into_header();
+        let header = cookie.clone().into_header();
         let decoded_cookie = config.cookies_from_header(header.clone()).unwrap();
         assert_eq!(&cookie, decoded_cookie.get("id").expect("no cookie"));
 

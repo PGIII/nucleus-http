@@ -1,21 +1,18 @@
 use crate::request;
-use tokio::{
-    fs
-};
+use tokio::fs;
 
 pub async fn handle(r: &request::Request) -> String {
     //Check path and send correct file
-    let file_name;
-    if r.path() == "/" {
-        //Send Index.html
-        file_name = "index.html";
+
+    let file_name = if r.path() == "/" {
+        "index.html"
     } else {
-        file_name = r.path();
-    }
+        r.path()
+    };
 
     let body;
     let status;
-    
+
     //try to read file, 404 if not found
     if let Ok(contents) = fs::read_to_string(file_name).await {
         body = contents;

@@ -151,8 +151,8 @@ where
                                 }
                                 Ok(n) => {
                                     //got some bytes append them and see if we need to do any proccessing
-                                    for i in 0..n {
-                                        request_bytes.put_u8(buffer[i]);
+                                    for b in buffer.iter().take(n) {
+                                        request_bytes.put_u8(*b);
                                     }
                                     let request_result =
                                         request::Request::from_bytes(request_bytes.clone().into());
