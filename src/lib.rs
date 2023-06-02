@@ -173,8 +173,11 @@ where
                                                     error.to_string()
                                                 );
                                             } else {
+                                                //clear buffer and shrink incase it grew
+                                                request_bytes.resize(1024, 0);
                                                 request_bytes.clear();
                                             }
+                                            drop(r);
                                         }
                                         Err(e) => match e {
                                             request::Error::InvalidString

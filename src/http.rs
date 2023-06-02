@@ -241,7 +241,7 @@ impl TryFrom<&[u8]> for Header {
         let value = &h_str[value_start..h_str.len()];
         Ok(Self {
             key: String::from_utf8_lossy(key).to_string().to_lowercase(),
-            value: String::from_utf8_lossy(value).to_string()
+            value: String::from_utf8_lossy(value).to_string(),
         })
     }
 }

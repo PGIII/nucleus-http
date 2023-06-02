@@ -409,6 +409,9 @@ impl Request {
 
     pub fn from_bytes(request_bytes: Bytes) -> Result<Request, Error> {
         let bytes = Bytes::from(request_bytes);
+        if bytes.len() == 0 {
+            return Err(Error::InvalidString);
+        }
         //first split the header from the body, first \r\n\r\n should seperate that
         if let Some(blank_line_index) = memmem::find(&bytes, b"\r\n\r\n") {
             let req_header = bytes.slice(0..blank_line_index + 2); //include last crlf for easier
@@ -466,48 +469,46 @@ impl Request {
                 }
 
                 //lastly check we got the full body of the request
+                if let Some(content_length) = Self::header_value(&headers, "Content-Length") {
+                    if let Ok(len) = content_length.parse() {
+                        if req_body.len() < len {
+                            return Err(Error::WaitingOnBody);
+                        }
+                    } else {
+                        return Err(Error::InvalidContentLength);
+                    }
+                }
                 if let Some(content_type) = Self::header_value(&headers, "Content-Type") {
                     match content_type {
-                        x if x.contains("multipart/form-data;") => match get_boundary(&x) {
-                            Ok(boundary) => {
-                                match get_multiparts_entries_from_bytes(
-                                    &req_body,
-                                    boundary.as_bytes(),
-                                ) {
-                                    Ok(entries) => {
-                                        form_data = FormTypes::MultiPart(entries);
-                                        req_body.clear(); //clear since we parsed it
-                                                          //return Ok(req);
-                                    }
-                                    Err(_) => {
-                                        return Err(Error::WaitingOnBody);
+                        x if x.contains("multipart/form-data;") => {
+                            match get_boundary(&x) {
+                                Ok(boundary) => {
+                                    match get_multiparts_entries_from_bytes(
+                                        &req_body,
+                                        boundary.as_bytes(),
+                                    ) {
+                                        Ok(entries) => {
+                                            form_data = FormTypes::MultiPart(entries);
+                                            req_body.clear(); //clear since we parsed it
+                                                              //return Ok(req);
+                                        }
+                                        Err(_) => {
+                                            return Err(Error::WaitingOnBody);
+                                        }
                                     }
                                 }
+                                Err(e) => {
+                                    log::debug!("Error Parsing Boundary: {}", e.to_string());
+                                    return Err(Error::MissingMultiPartBoundary);
+                                }
                             }
-                            Err(e) => {
-                                log::debug!("Error Parsing Boundary: {}", e.to_string());
-                                return Err(Error::MissingMultiPartBoundary);
-                            }
-                        },
+                        }
                         x if x.contains("application/x-www-form-urlencoded") => {
-                            if let Some(content_lenth) =
-                                Self::header_value(&headers, "Content-Length")
-                            {
-                                if let Ok(len) = content_lenth.parse() {
-                                    if req_body.len() < len {
-                                        return Err(Error::WaitingOnBody);
-                                    }
-                                } else {
-                                    return Err(Error::InvalidContentLength);
-                                }
-                            } else {
-                                return Err(Error::MissingContentLength);
-                            }
+                            //Parse here
                         }
                         _ => {}
                     }
                 }
-
                 return Ok(Request {
                     method,
                     version,
@@ -519,7 +520,6 @@ impl Request {
                     form_data,
                 });
             } else {
-                println!("Request Header: {:#?}", req_header);
                 //no headers, we need at least the host header
                 panic!("request parsing: Somehow missing CRLF even though CRLFCRLF was present");
             }
@@ -529,65 +529,8 @@ impl Request {
     }
 
     pub fn from_string(request_str: String) -> Result<Request, Error> {
-        //Make sure its not an empty string and has at least one line
-        if request_str.len() == 0 {
-            return Err(Error::InvalidString);
-        }
-
-        let blank_line_split: Vec<&str> = request_str.split("\r\n\r\n").collect();
-        let lines: Vec<&str> = blank_line_split[0].split("\r\n").collect();
-
-        if blank_line_split.len() == 1 {
-            return Err(Error::MissingBlankLine);
-        }
-
-        let request = Request::from_lines(&lines);
-        if let Ok(mut req) = request.clone() {
-            if let Some(content_type) = req.get_header_value("Content-Type") {
-                match content_type {
-                    x if x.contains("multipart/form-data;") => match get_boundary(&x) {
-                        Ok(boundary) => {
-                            let body =
-                                &blank_line_split[1..blank_line_split.len()].join("\r\n\r\n");
-                            match get_multiparts_entries_from_str(body, boundary) {
-                                Ok(entries) => {
-                                    req.form_data = FormTypes::MultiPart(entries);
-                                    req.body.clear(); //Should we clear the body here ? its been
-                                                      //processed
-                                    return Ok(req);
-                                }
-                                Err(_) => {
-                                    return Err(Error::WaitingOnBody);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            return Err(Error::MissingMultiPartBoundary);
-                        }
-                    },
-                    x if x.contains("application/x-www-form-urlencoded") => {
-                        if let Some(content_lenth) = req.get_header_value("Content-Length") {
-                            if let Ok(len) = content_lenth.parse() {
-                                if blank_line_split[1].len() < len {
-                                    return Err(Error::WaitingOnBody);
-                                } else {
-                                    let body = &blank_line_split[1][0..len];
-                                    req.body.extend_from_slice(body.as_bytes());
-                                    return Ok(req);
-                                }
-                            } else {
-                                return Err(Error::InvalidContentLength);
-                            }
-                        } else {
-                            return Err(Error::MissingContentLength);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        return request;
+        let bytes = Bytes::from(request_str);
+        Self::from_bytes(bytes)
     }
 
     pub fn query_string(&self) -> Option<&String> {
