@@ -1,14 +1,17 @@
+use crate::{
+    http::{Header, Method, Version},
+    utils,
+};
 use bytes::Bytes;
-use memchr::{memchr, memchr_iter, memmem};
-
-use crate::http::{Header, Method, Version};
 use core::fmt;
+use memchr::{memchr, memchr_iter, memmem};
 use std::{collections::HashMap, format, vec};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FormTypes {
     None,
     MultiPart(HashMap<String, MultiPartFormEntry>),
+    XUrlEncoded(HashMap<String, String>), //simple string key value pair
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -34,6 +37,7 @@ pub enum Error {
     WaitingOnBody(Option<usize>), // this can return number of bytes left in body
     MissingMultiPartBoundary,
     MissingContentLength,
+    InvalidUrlEncodedForm,
 }
 
 impl std::error::Error for Error {
@@ -54,6 +58,7 @@ impl From<&Error> for String {
             Error::InvalidContentLength => "Content Length Invalid".to_string(),
             Error::MissingMultiPartBoundary => "Missing Mulipart boundary".to_string(),
             Error::MissingContentLength => "Missing Content Length Header".to_string(),
+            Error::InvalidUrlEncodedForm => "Invalid URL Encoded Form".to_string(),
         }
     }
 }
@@ -477,6 +482,19 @@ impl Request {
                         }
                         x if x.contains("application/x-www-form-urlencoded") => {
                             //Parse here
+                            match utils::parse_query_string(&req_body) {
+                                Ok(form) => {
+                                    form_data = FormTypes::XUrlEncoded(form);
+                                    req_body.clear();
+                                }
+                                Err(e) => {
+                                    log::error!(
+                                        "Error Parsing URL Encoded Body: {}",
+                                        e.to_string()
+                                    );
+                                    return Err(Error::InvalidUrlEncodedForm);
+                                }
+                            }
                         }
                         _ => {}
                     }
@@ -522,11 +540,15 @@ mod tests {
 
     #[test]
     fn x_url_encoded_form() {
+        let mut map = HashMap::new();
+        map.insert("field1".to_string(), "value1".to_string());
+        map.insert("field2".to_string(), "value2".to_string());
+
         let expected = Request {
             method: Method::POST,
             version: Version::V1_1,
             path: "/test".to_string(),
-            body: "field1=value1&field2=value2".into(),
+            body: vec![],
             headers: HashMap::from([
                 ("host".to_string(), "foo.example".to_string()),
                 (
@@ -537,7 +559,7 @@ mod tests {
             ]),
             host: "foo.example".to_string(),
             query_string: None,
-            form_data: FormTypes::None,
+            form_data: FormTypes::XUrlEncoded(map),
         };
         let request_str = Bytes::from_static(
             b"POST /test HTTP/1.1\r\n\
