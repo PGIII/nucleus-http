@@ -24,11 +24,14 @@ pub fn base64_decode(encoded: String) -> Result<Vec<u8>, anyhow::Error> {
 }
 
 pub fn parse_query_string(query: &Bytes) -> Result<HashMap<String, String>, anyhow::Error> {
+    let mut map = HashMap::new();
+    if query.is_empty() {
+        return Ok(map);
+    }
     //Each entry is split with &
     let mut and_iter = memchr_iter(b'&', query);
     let mut next_slice_start_at = 0;
     let mut data_left = true;
-    let mut map = HashMap::new();
     while data_left {
         let slice;
         match and_iter.next() {
@@ -66,9 +69,6 @@ mod tests {
             "vanilla",
             query.get("flavor").expect("Flavor Missing in Map")
         );
-        assert_eq!(
-            "ice cream",
-            query.get("food").expect("Food Misisng in map")
-        );
+        assert_eq!("ice cream", query.get("food").expect("Food Misisng in map"));
     }
 }
