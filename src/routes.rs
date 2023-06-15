@@ -40,8 +40,9 @@ where
 
 pub enum RouteResolver<S> {
     Static { file_path: String },
-    RedirectAll(String),
+    Redirect(String),
     Function(Arc<Box<dyn RequestResolver<S>>>),
+    Embed(&'static [u8], MimeType),
 }
 
 pub struct Route<S> {
@@ -131,7 +132,7 @@ where
                         return Self::get_file(path).await;
                     }
                 }
-                RouteResolver::RedirectAll(redirect_to) => {
+                RouteResolver::Redirect(redirect_to) => {
                     let mut response = Response::new(
                         http::StatusCode::MovedPermanetly,
                         vec![],
@@ -145,6 +146,9 @@ where
                     return resolver
                         .resolve(self.state.clone(), request.to_owned())
                         .await;
+                }
+                RouteResolver::Embed(body, mime_type) => {
+                    Response::new(http::StatusCode::OK, body.to_vec(), *mime_type);
                 }
             }
         }
@@ -203,11 +207,22 @@ impl<S> Route<S>
 where
     S: Clone + Send + Sync + 'static,
 {
+    /// Route that redirects to another URL
+    pub fn redirect(path: &str, redirect_url: &str) -> Self {
+        let method = Method::GET;
+        Route {
+            path: path.to_string(),
+            resolver: RouteResolver::Redirect(redirect_url.to_string()),
+            method,
+        }
+    }
+
+    /// Reroutes all traffic to url
     pub fn redirect_all(redirect_url: &str) -> Self {
         let method = Method::GET;
         Route {
             path: "*".to_string(),
-            resolver: RouteResolver::RedirectAll(redirect_url.to_string()),
+            resolver: RouteResolver::Redirect(redirect_url.to_string()),
             method,
         }
     }
@@ -235,6 +250,18 @@ where
             path: path.to_string(),
             resolver,
             method,
+        }
+    }
+
+    /// use include_bytes! to load a file as static
+    /// when this route is requested the static data is return with the passes mime type
+    pub fn embed(path: &str, body: &'static [u8], mime: MimeType) -> Self {
+        let method = Method::GET;
+        let resolver = RouteResolver::Embed(body, mime);
+        Route {
+            method,
+            path: path.into(),
+            resolver,
         }
     }
 
@@ -284,11 +311,38 @@ where
     }
 }
 
+#[macro_export]
+macro_rules! embed_route {
+    ($route_path:expr, $file_path:expr) => {
+        //embed file
+        Route::embed(
+            $route_path,
+            include_bytes!($file_path),
+            PathBuf::from($file_path).into(),
+        )
+    };
+}
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::virtual_host::VirtualHost;
 
-    use super::*;
+    #[tokio::test]
+    async fn create_embedded_html_route() {
+        let route: Route<()> = embed_route!("/test", "../index.html");
+        assert_eq!(route.path, "/test", "route path incorrect");
+        assert_eq!(route.method, Method::GET, "route method incorrect");
+        if let RouteResolver::Embed(body, mime) = route.resolver {
+            assert_eq!(
+                include_bytes!("../index.html"),
+                body,
+                "embedded body incorect"
+            );
+            assert_eq!(MimeType::HTML, mime);
+        } else {
+            panic!("wrong route type");
+        }
+    }
 
     #[tokio::test]
     async fn route_static_file() {
