@@ -8,9 +8,10 @@ use nucleus_http::{
     Server,
 };
 use std::format;
+use std::path::PathBuf;
 
 #[tokio::test]
-async fn redirect_all() {
+async fn embed() {
     pretty_env_logger::init();
     let tcp_port = TcpPort::in_range(
         "127.0.0.1",
@@ -25,15 +26,19 @@ async fn redirect_all() {
     let localhost_vhost = VirtualHost::new("localhost", &listener_ip, "./");
 
     let mut router = Router::new(());
-    router.add_route(Route::redirect("/", "/index.html")).await;
+    router
+        .add_route(nucleus_http::embed_route!("/", "../index.html"))
+        .await;
     let mut server = Server::bind(&listener_ip, router).await.unwrap();
     server.add_virtual_host(localhost_vhost).await;
     tokio::spawn(async move { server.serve().await.expect("Server Shutdown") });
 
     let url = format!("http://localhost:{}/", tcp_port);
-    let expected = format!("http://localhost:{}/index.html", tcp_port);
+    let index_string = include_str!("../index.html");
     let client_builder = reqwest::ClientBuilder::new();
     let client = client_builder.build().unwrap();
     let res = client.get(&url).send().await.unwrap();
-    assert_eq!(expected, res.url().to_string());
+    assert_eq!(url, res.url().to_string());
+    assert_eq!(reqwest::StatusCode::from_u16(200).unwrap(), res.status());
+    assert_eq!(index_string, res.text().await.unwrap());
 }

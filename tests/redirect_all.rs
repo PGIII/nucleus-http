@@ -25,7 +25,7 @@ async fn redirect_all() {
     let localhost_vhost = VirtualHost::new("localhost", &listener_ip, "./");
 
     let mut router = Router::new(());
-    router.add_route(Route::redirect("/", "/index.html")).await;
+    router.add_route(Route::redirect_all("/index.html")).await;
     let mut server = Server::bind(&listener_ip, router).await.unwrap();
     server.add_virtual_host(localhost_vhost).await;
     tokio::spawn(async move { server.serve().await.expect("Server Shutdown") });

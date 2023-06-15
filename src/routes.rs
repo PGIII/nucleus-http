@@ -125,11 +125,14 @@ where
 
         //serve specific route if we match
         if let Some(route) = matching_route {
+            log::debug!("Found matching route");
             match route.resolver() {
                 RouteResolver::Static { file_path } => {
                     if let Some(host_dir) = Self::get_vhost_dir(request, vhosts.clone()).await {
                         let path = host_dir.join(file_path);
-                        return Self::get_file(path).await;
+                        Self::get_file(path).await
+                    } else {
+                        Response::error(http::StatusCode::ErrNotFound, "File Not Found".into())
                     }
                 }
                 RouteResolver::Redirect(redirect_to) => {
@@ -139,22 +142,19 @@ where
                         MimeType::PlainText,
                     );
                     response.add_header(("Location", redirect_to));
-                    return response;
+                    response
                 }
                 RouteResolver::Function(resolver) => {
                     let resolver = resolver.clone();
-                    return resolver
+                    resolver
                         .resolve(self.state.clone(), request.to_owned())
-                        .await;
+                        .await
                 }
                 RouteResolver::Embed(body, mime_type) => {
-                    Response::new(http::StatusCode::OK, body.to_vec(), *mime_type);
+                    Response::new(http::StatusCode::OK, body.to_vec(), *mime_type)
                 }
             }
-        }
-
-        //server static files based on vhost
-        if let Some(host_dir) = Self::get_vhost_dir(request, vhosts).await {
+        } else if let Some(host_dir) = Self::get_vhost_dir(request, vhosts).await {
             let mut file_path = PathBuf::from(request.path());
             if file_path.is_absolute() {
                 if let Ok(path) = file_path.strip_prefix("/") {
@@ -165,11 +165,10 @@ where
             }
             let final_path = host_dir.join(file_path);
             return Self::get_file(final_path).await;
+        } else {
+            //no route try static serve
+            Response::error(http::StatusCode::ErrNotFound, "File Not Found".into())
         }
-
-        //no route try static serve
-
-        Response::error(http::StatusCode::ErrNotFound, "File Not Found".into())
     }
 
     async fn get_file(path: PathBuf) -> Response {
