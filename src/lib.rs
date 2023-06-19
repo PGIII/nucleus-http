@@ -9,6 +9,7 @@ pub mod thread_pool;
 pub mod utils;
 pub mod virtual_host;
 
+use anyhow::Context;
 use bytes::{BufMut, BytesMut};
 
 use response::Response;
@@ -79,16 +80,18 @@ where
         cert: &Path,
         key: &Path,
         router: Router<S>,
-    ) -> Result<Self, tokio::io::Error> {
+    ) -> Result<Self, anyhow::Error> {
         let files = vec![cert, key];
         let (mut keys, certs) = load_keys_and_certs(&files)?;
+        let context = format!("Loading: {:#?}, {:#?}", cert, key);
         let config = rustls::ServerConfig::builder()
             .with_safe_defaults()
             .with_no_client_auth()
-            .with_single_cert(certs, keys.remove(0))
-            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
+            .with_single_cert(certs, keys.remove(0)).context(context)?;
         let acceptor = TlsAcceptor::from(Arc::new(config));
-        let listener = tokio::net::TcpListener::bind(ip).await?;
+        let listener = tokio::net::TcpListener::bind(ip)
+            .await
+            .context("binding tls")?;
         Ok(Server {
             listener,
             router: Arc::new(RwLock::new(router)),
@@ -181,10 +184,12 @@ where
                                             | request::Error::MissingBlankLine => {}
                                             request::Error::WaitingOnBody(pb) => {
                                                 if let Some(bytes_left) = pb {
-                                                    let free_bytes = request_bytes.capacity() - request_bytes.len();
+                                                    let free_bytes = request_bytes.capacity()
+                                                        - request_bytes.len();
                                                     if free_bytes < bytes_left {
                                                         // we know body size preallocate for it
-                                                        request_bytes.reserve(bytes_left - free_bytes);
+                                                        request_bytes
+                                                            .reserve(bytes_left - free_bytes);
                                                     }
                                                 }
                                             }
