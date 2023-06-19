@@ -82,12 +82,13 @@ where
         router: Router<S>,
     ) -> Result<Self, anyhow::Error> {
         let files = vec![cert, key];
-        let (mut keys, certs) = load_keys_and_certs(&files)?;
-        let context = format!("Loading: {:#?}, {:#?}", cert, key);
+        let context = format!("Opening: {:#?}, {:#?}", cert, key);
+        let (mut keys, certs) = load_keys_and_certs(&files).context(context)?;
         let config = rustls::ServerConfig::builder()
             .with_safe_defaults()
             .with_no_client_auth()
-            .with_single_cert(certs, keys.remove(0)).context(context)?;
+            .with_single_cert(certs, keys.remove(0))
+            .context("Loading Certs")?;
         let acceptor = TlsAcceptor::from(Arc::new(config));
         let listener = tokio::net::TcpListener::bind(ip)
             .await
