@@ -94,7 +94,7 @@ where
         request: &Request,
         vhosts: Arc<RwLock<Vec<VirtualHost>>>,
     ) -> Response {
-        log::info!("{} Request for: {}", request.method(), request.path());
+        tracing::info!("{} Request for: {}", request.method(), request.path());
         let routes = self.routes();
         let routes_locked = &routes.read().await[*request.method()];
         let mut matching_route = None;
@@ -125,7 +125,7 @@ where
 
         //serve specific route if we match
         if let Some(route) = matching_route {
-            log::debug!("Found matching route");
+            tracing::debug!("Found matching route");
             match route.resolver() {
                 RouteResolver::Static { file_path } => {
                     if let Some(host_dir) = Self::get_vhost_dir(request, vhosts.clone()).await {

@@ -65,6 +65,7 @@ impl<S> Server<S>
 where
     S: Clone + Send + Sync + 'static,
 {
+    #[tracing::instrument(level = "debug", skip(router))]  
     pub async fn bind(ip: &str, router: Router<S>) -> Result<Self, tokio::io::Error> {
         let listener = tokio::net::TcpListener::bind(ip).await?;
         Ok(Server {
@@ -140,7 +141,7 @@ where
             match accept_attempt {
                 Ok(mut connection) => {
                     let router = self.router.clone();
-                    log::info!("Accepted Connection From {}", connection.client_ip);
+                    tracing::info!("Accepted Connection From {}", connection.client_ip);
 
                     tokio::spawn(async move {
                         let mut request_bytes = BytesMut::with_capacity(1024);
@@ -148,7 +149,7 @@ where
                             let mut buffer = vec![0; 1024]; //Vector to avoid buffer on stack
                             match connection.stream.read(&mut buffer).await {
                                 Ok(0) => {
-                                    log::debug!("Connection Terminated by client");
+                                    tracing::debug!("Connection Terminated by client");
                                     break;
                                 }
                                 Ok(n) => {
@@ -170,7 +171,7 @@ where
                                                 // not clearing string here so we can try
                                                 // again, otherwise might be terminated
                                                 // connection which will be handled
-                                                log::error!(
+                                                tracing::error!(
                                                     "Error Writing response: {}",
                                                     error.to_string()
                                                 );
@@ -196,7 +197,7 @@ where
                                             }
                                             _ => {
                                                 let error_res = format!("400 bad request: {}", e);
-                                                log::debug!("{}", error_res);
+                                                tracing::debug!("{}", error_res);
                                                 let response = Response::error(
                                                     http::StatusCode::ErrBadRequest,
                                                     error_res.into(),
@@ -204,7 +205,7 @@ where
                                                 if let Err(err) =
                                                     connection.write_response(response).await
                                                 {
-                                                    log::error!(
+                                                    tracing::error!(
                                                         "Error Writing Data: {}",
                                                         err.to_string()
                                                     );
@@ -214,7 +215,7 @@ where
                                     }
                                 }
                                 Err(err) => {
-                                    log::error!("Socket read error: {}", err.to_string());
+                                    tracing::error!("Socket read error: {}", err.to_string());
                                     break;
                                 }
                             }
@@ -222,7 +223,7 @@ where
                     });
                 }
                 Err(e) => {
-                    log::error!("Error Accepting Connection: {}", e.to_string());
+                    tracing::error!("Error Accepting Connection: {}", e.to_string());
                 }
             }
         }

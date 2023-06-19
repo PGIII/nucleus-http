@@ -24,6 +24,7 @@ serde_json = "1.0.96"
 sha2 = "0.10.6"
 tokio = { version = "1", features = ["full", "tracing"] }
 tokio-rustls = "0.24.0"
+tracing = "0.1.37"
 
 [dev-dependencies]
 argh = "0.1.10"
