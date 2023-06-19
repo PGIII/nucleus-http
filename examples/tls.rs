@@ -33,7 +33,7 @@ struct Options {
 }
 
 #[tokio::main]
-async fn main() -> tokio::io::Result<()> {
+async fn main() -> anyhow::Result<()> {
     pretty_env_logger::init();
     let options: Options = argh::from_env();
 
