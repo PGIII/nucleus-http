@@ -19,19 +19,22 @@ use tokio::{
     self,
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::TcpListener,
-    sync::RwLock,
+    select,
+    sync::{Mutex, RwLock},
     task::JoinHandle,
 };
 use tokio_rustls::{
     rustls::{self, Certificate, PrivateKey},
     TlsAcceptor,
 };
+use tokio_util::sync::CancellationToken;
 
 pub struct Server<S> {
     listener: TcpListener,
     acceptor: Option<TlsAcceptor>,
     router: Arc<RwLock<Router<S>>>,
     virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
+    cancel: CancellationToken,
 }
 
 trait Stream: AsyncWrite + AsyncRead + Unpin + Send + Sync {}
@@ -77,6 +80,7 @@ where
             router: Arc::new(RwLock::new(router)),
             virtual_hosts: Arc::new(RwLock::new(vec![])),
             acceptor: None,
+            cancel: CancellationToken::new(),
         })
     }
 
@@ -104,6 +108,7 @@ where
             router: Arc::new(RwLock::new(router)),
             virtual_hosts: Arc::new(RwLock::new(vec![])),
             acceptor: Some(acceptor),
+            cancel: CancellationToken::new(),
         })
     }
 
@@ -147,7 +152,8 @@ where
     #[tracing::instrument(level = "debug", skip(self, connection))]
     fn serve_connection(&self, mut connection: Connection) -> JoinHandle<()> {
         let router = self.router.clone();
-        tokio::spawn(async move {
+        let token = self.cancel.clone();
+        let read_loop = async move {
             let mut request_bytes = BytesMut::with_capacity(1024);
             loop {
                 let mut buffer = vec![0; 1024]; //Vector to avoid buffer on stack
@@ -215,27 +221,49 @@ where
                     }
                 }
             }
+        };
+
+        tokio::spawn(async move {
+            select! {
+                _ = read_loop => {
+                }
+                _ = token.cancelled() => {
+                    tracing::debug!("shutting down listen thread");
+                }
+            }
         })
     }
 
     #[tracing::instrument(level = "debug", skip(self))]
     pub async fn serve(&self) -> tokio::io::Result<()> {
-        let mut tasks = vec![];
-        loop {
-            let accept_attempt = self.accept().await;
-            match accept_attempt {
-                Ok(connection) => {
-                    tracing::info!("Accepted Connection From {}", connection.client_ip);
-                    tasks.push(self.serve_connection(connection));
+        let accept_loop = async move {
+            loop {
+                let accept_attempt = self.accept().await;
+                match accept_attempt {
+                    Ok(connection) => {
+                        tracing::info!("Accepted Connection From {}", connection.client_ip);
+                        self.serve_connection(connection);
+                    }
+                    Err(e) => {
+                        tracing::error!("Error Accepting Connection: {}", e.to_string());
+                    }
                 }
-                Err(e) => {
-                    tracing::error!("Error Accepting Connection: {}", e.to_string());
-                }
+            }
+        };
+
+        select! {
+            _ = accept_loop => {
+                tracing::info!("shutting down due to acceptor exit");
+                Ok(())
+            }
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("Received CTRL C shutting down");
+                self.cancel.cancel();
+                Ok(())
             }
         }
     }
 }
-
 fn load_keys_and_certs(paths: &Vec<&Path>) -> std::io::Result<(Vec<PrivateKey>, Vec<Certificate>)> {
     let mut keys = vec![];
     let mut certs = vec![];
