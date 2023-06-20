@@ -144,11 +144,9 @@ where
         }
     }
 
-    #[tracing::instrument(level = "debug", skip(router, connection))]
-    fn serve_connection(
-        mut connection: Connection,
-        router: Arc<RwLock<Router<S>>>,
-    ) -> JoinHandle<()> {
+    #[tracing::instrument(level = "debug", skip(self, connection))]
+    fn serve_connection(&self, mut connection: Connection) -> JoinHandle<()> {
+        let router = self.router.clone();
         tokio::spawn(async move {
             let mut request_bytes = BytesMut::with_capacity(1024);
             loop {
@@ -227,9 +225,8 @@ where
             let accept_attempt = self.accept().await;
             match accept_attempt {
                 Ok(connection) => {
-                    let router = self.router.clone();
                     tracing::info!("Accepted Connection From {}", connection.client_ip);
-                    tasks.push(Self::serve_connection(connection, router));
+                    tasks.push(self.serve_connection(connection));
                 }
                 Err(e) => {
                     tracing::error!("Error Accepting Connection: {}", e.to_string());
