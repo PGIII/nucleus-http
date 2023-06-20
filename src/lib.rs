@@ -20,6 +20,7 @@ use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::TcpListener,
     select,
+    signal::unix::{signal, SignalKind},
     sync::RwLock,
     task::JoinHandle,
 };
@@ -251,12 +252,18 @@ where
             }
         };
 
+        let mut sigterm = signal(SignalKind::terminate()).unwrap();
         select! {
             _ = accept_loop => {
                 tracing::info!("shutting down due to acceptor exit");
                 Ok(())
             }
             _ = tokio::signal::ctrl_c() => {
+                tracing::info!("Received CTRL C shutting down");
+                self.cancel.cancel();
+                Ok(())
+            }
+            _ = sigterm.recv() => {
                 tracing::info!("Received CTRL C shutting down");
                 self.cancel.cancel();
                 Ok(())
