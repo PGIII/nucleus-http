@@ -14,12 +14,13 @@ use bytes::{BufMut, BytesMut};
 
 use response::Response;
 use routes::Router;
-use std::{path::Path, sync::Arc};
+use std::{path::Path, sync::Arc, vec};
 use tokio::{
     self,
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::TcpListener,
     sync::RwLock,
+    task::JoinHandle,
 };
 use tokio_rustls::{
     rustls::{self, Certificate, PrivateKey},
@@ -45,15 +46,18 @@ pub struct Connection {
 }
 
 impl Connection {
+    #[tracing::instrument(level = "debug", skip(self))]
     pub fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>> {
         self.virtual_hosts.clone()
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     pub async fn write_all(&mut self, src: &[u8]) -> tokio::io::Result<()> {
         self.stream.write_all(src).await?;
         Ok(())
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     pub async fn write_response(&mut self, response: Response) -> tokio::io::Result<()> {
         let response_buffer = response.to_send_buffer();
         self.write_all(&response_buffer).await?;
@@ -65,7 +69,7 @@ impl<S> Server<S>
 where
     S: Clone + Send + Sync + 'static,
 {
-    #[tracing::instrument(level = "debug", skip(router))]  
+    #[tracing::instrument(level = "debug", skip(router))]
     pub async fn bind(ip: &str, router: Router<S>) -> Result<Self, tokio::io::Error> {
         let listener = tokio::net::TcpListener::bind(ip).await?;
         Ok(Server {
@@ -76,6 +80,7 @@ where
         })
     }
 
+    #[tracing::instrument(level = "debug", skip(router))]
     pub async fn bind_tls(
         ip: &str,
         cert: &Path,
@@ -102,15 +107,19 @@ where
         })
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     pub fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>> {
         self.virtual_hosts.clone()
     }
+
+    #[tracing::instrument(level = "debug", skip(self, virtual_host))]
     pub async fn add_virtual_host(&mut self, virtual_host: virtual_host::VirtualHost) {
         let virtual_hosts = self.virtual_hosts();
         let mut locked = virtual_hosts.write().await;
         locked.push(virtual_host);
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     pub async fn accept(&self) -> tokio::io::Result<Connection> {
         let (stream, client_ip) = self.listener.accept().await?;
         if let Some(acceptor) = &self.acceptor {
@@ -135,92 +144,92 @@ where
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(router, connection))]
+    fn serve_connection(
+        mut connection: Connection,
+        router: Arc<RwLock<Router<S>>>,
+    ) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut request_bytes = BytesMut::with_capacity(1024);
+            loop {
+                let mut buffer = vec![0; 1024]; //Vector to avoid buffer on stack
+                match connection.stream.read(&mut buffer).await {
+                    Ok(0) => {
+                        tracing::debug!("Connection Terminated by client");
+                        break;
+                    }
+                    Ok(n) => {
+                        //got some bytes append them and see if we need to do any proccessing
+                        for b in buffer.iter().take(n) {
+                            request_bytes.put_u8(*b);
+                        }
+                        let request_result =
+                            request::Request::from_bytes(request_bytes.clone().into());
+                        match request_result {
+                            Ok(r) => {
+                                let router_locked = router.read().await;
+                                let response =
+                                    router_locked.route(&r, connection.virtual_hosts()).await;
+                                if let Err(error) = connection.write_response(response).await {
+                                    // not clearing string here so we can try
+                                    // again, otherwise might be terminated
+                                    // connection which will be handled
+                                    tracing::error!(
+                                        "Error Writing response: {}",
+                                        error.to_string()
+                                    );
+                                } else {
+                                    //clear buffer
+                                    request_bytes.clear();
+                                }
+                                drop(r);
+                            }
+                            Err(e) => match e {
+                                request::Error::InvalidString
+                                | request::Error::MissingBlankLine => {}
+                                request::Error::WaitingOnBody(pb) => {
+                                    if let Some(bytes_left) = pb {
+                                        let free_bytes =
+                                            request_bytes.capacity() - request_bytes.len();
+                                        if free_bytes < bytes_left {
+                                            // we know body size preallocate for it
+                                            request_bytes.reserve(bytes_left - free_bytes);
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    let error_res = format!("400 bad request: {}", e);
+                                    tracing::debug!("{}", error_res);
+                                    let response = Response::error(
+                                        http::StatusCode::ErrBadRequest,
+                                        error_res.into(),
+                                    );
+                                    if let Err(err) = connection.write_response(response).await {
+                                        tracing::error!("Error Writing Data: {}", err.to_string());
+                                    }
+                                }
+                            },
+                        }
+                    }
+                    Err(err) => {
+                        tracing::error!("Socket read error: {}", err.to_string());
+                        break;
+                    }
+                }
+            }
+        })
+    }
+
+    #[tracing::instrument(level = "debug", skip(self))]
     pub async fn serve(&self) -> tokio::io::Result<()> {
+        let mut tasks = vec![];
         loop {
             let accept_attempt = self.accept().await;
             match accept_attempt {
-                Ok(mut connection) => {
+                Ok(connection) => {
                     let router = self.router.clone();
                     tracing::info!("Accepted Connection From {}", connection.client_ip);
-
-                    tokio::spawn(async move {
-                        let mut request_bytes = BytesMut::with_capacity(1024);
-                        loop {
-                            let mut buffer = vec![0; 1024]; //Vector to avoid buffer on stack
-                            match connection.stream.read(&mut buffer).await {
-                                Ok(0) => {
-                                    tracing::debug!("Connection Terminated by client");
-                                    break;
-                                }
-                                Ok(n) => {
-                                    //got some bytes append them and see if we need to do any proccessing
-                                    for b in buffer.iter().take(n) {
-                                        request_bytes.put_u8(*b);
-                                    }
-                                    let request_result =
-                                        request::Request::from_bytes(request_bytes.clone().into());
-                                    match request_result {
-                                        Ok(r) => {
-                                            let router_locked = router.read().await;
-                                            let response = router_locked
-                                                .route(&r, connection.virtual_hosts())
-                                                .await;
-                                            if let Err(error) =
-                                                connection.write_response(response).await
-                                            {
-                                                // not clearing string here so we can try
-                                                // again, otherwise might be terminated
-                                                // connection which will be handled
-                                                tracing::error!(
-                                                    "Error Writing response: {}",
-                                                    error.to_string()
-                                                );
-                                            } else {
-                                                //clear buffer
-                                                request_bytes.clear();
-                                            }
-                                            drop(r);
-                                        }
-                                        Err(e) => match e {
-                                            request::Error::InvalidString
-                                            | request::Error::MissingBlankLine => {}
-                                            request::Error::WaitingOnBody(pb) => {
-                                                if let Some(bytes_left) = pb {
-                                                    let free_bytes = request_bytes.capacity()
-                                                        - request_bytes.len();
-                                                    if free_bytes < bytes_left {
-                                                        // we know body size preallocate for it
-                                                        request_bytes
-                                                            .reserve(bytes_left - free_bytes);
-                                                    }
-                                                }
-                                            }
-                                            _ => {
-                                                let error_res = format!("400 bad request: {}", e);
-                                                tracing::debug!("{}", error_res);
-                                                let response = Response::error(
-                                                    http::StatusCode::ErrBadRequest,
-                                                    error_res.into(),
-                                                );
-                                                if let Err(err) =
-                                                    connection.write_response(response).await
-                                                {
-                                                    tracing::error!(
-                                                        "Error Writing Data: {}",
-                                                        err.to_string()
-                                                    );
-                                                }
-                                            }
-                                        },
-                                    }
-                                }
-                                Err(err) => {
-                                    tracing::error!("Socket read error: {}", err.to_string());
-                                    break;
-                                }
-                            }
-                        }
-                    });
+                    tasks.push(Self::serve_connection(connection, router));
                 }
                 Err(e) => {
                     tracing::error!("Error Accepting Connection: {}", e.to_string());
