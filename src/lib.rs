@@ -20,7 +20,7 @@ use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::TcpListener,
     select,
-    sync::{Mutex, RwLock},
+    sync::RwLock,
     task::JoinHandle,
 };
 use tokio_rustls::{
