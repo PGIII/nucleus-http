@@ -264,7 +264,7 @@ where
                 Ok(())
             }
             _ = sigterm.recv() => {
-                tracing::info!("Received CTRL C shutting down");
+                tracing::info!("Received SigTerm shutting down");
                 self.cancel.cancel();
                 Ok(())
             }
