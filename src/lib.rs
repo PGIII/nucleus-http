@@ -64,6 +64,7 @@ impl Connection {
     #[tracing::instrument(level = "debug", skip(self))]
     pub async fn write_response(&mut self, response: Response) -> tokio::io::Result<()> {
         let response_buffer = response.to_send_buffer();
+        log::trace!("Writing: {}Bytes", response_buffer.len());
         self.write_all(&response_buffer).await?;
         Ok(())
     }
