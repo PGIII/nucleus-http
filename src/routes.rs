@@ -89,12 +89,12 @@ where
         Arc::new(RwLock::new(map))
     }
 
+    #[tracing::instrument(level = "debug", skip(self, vhosts))]
     pub async fn route(
         &self,
         request: &Request,
         vhosts: Arc<RwLock<Vec<VirtualHost>>>,
     ) -> Response {
-        tracing::info!("{} Request for: {}", request.method(), request.path());
         let routes = self.routes();
         let routes_locked = &routes.read().await[*request.method()];
         let mut matching_route = None;

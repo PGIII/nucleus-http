@@ -172,6 +172,12 @@ where
                             request::Request::from_bytes(request_bytes.clone().into());
                         match request_result {
                             Ok(r) => {
+                                tracing::info!(
+                                    "{} Request for: {} from {}",
+                                    r.method(),
+                                    r.path(),
+                                    connection.client_ip
+                                );
                                 let router_locked = router.read().await;
                                 let response =
                                     router_locked.route(&r, connection.virtual_hosts()).await;
