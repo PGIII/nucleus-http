@@ -178,9 +178,12 @@ where
                                     r.path(),
                                     connection.client_ip
                                 );
+                                tracing::trace!("Getting Router lock");
                                 let router_locked = router.read().await;
+                                tracing::trace!("Got lock, getting response");
                                 let response =
                                     router_locked.route(&r, connection.virtual_hosts()).await;
+                                tracing::trace!("Writing Response: {:#?}", response);
                                 if let Err(error) = connection.write_response(response).await {
                                     // not clearing string here so we can try
                                     // again, otherwise might be terminated
@@ -191,6 +194,7 @@ where
                                     );
                                 } else {
                                     //clear buffer
+                                    tracing::trace!("Wrote response, clearing request buffer");
                                     request_bytes.clear();
                                 }
                                 drop(r);
