@@ -154,13 +154,14 @@ where
     fn serve_connection(&self, mut connection: Connection) -> JoinHandle<()> {
         let router = self.router.clone();
         let token = self.cancel.clone();
+        let ip = connection.client_ip;
         let read_loop = async move {
             let mut request_bytes = BytesMut::with_capacity(1024);
             loop {
                 let mut buffer = vec![0; 1024]; //Vector to avoid buffer on stack
                 match connection.stream.read(&mut buffer).await {
                     Ok(0) => {
-                        tracing::debug!("Connection Terminated by client");
+                        tracing::debug!("{ip}: Connection Terminated by client");
                         break;
                     }
                     Ok(n) => {
@@ -172,29 +173,27 @@ where
                             request::Request::from_bytes(request_bytes.clone().into());
                         match request_result {
                             Ok(r) => {
-                                tracing::info!(
-                                    "{} Request for: {} from {}",
-                                    r.method(),
-                                    r.path(),
-                                    connection.client_ip
-                                );
-                                tracing::trace!("Getting Router lock");
+                                let path = r.path();
+                                tracing::info!("{ip}: {} Request for: {}", r.method(), path,);
+                                tracing::trace!("{ip}|{path}: Getting Router lock");
                                 let router_locked = router.read().await;
-                                tracing::trace!("Got lock, getting response");
+                                tracing::trace!("{ip}|{path}: Got lock, getting response");
                                 let response =
                                     router_locked.route(&r, connection.virtual_hosts()).await;
-                                tracing::trace!("Writing Response");
+                                tracing::trace!("{ip}|{path}: Writing Response");
                                 if let Err(error) = connection.write_response(response).await {
                                     // not clearing string here so we can try
                                     // again, otherwise might be terminated
                                     // connection which will be handled
                                     tracing::error!(
-                                        "Error Writing response: {}",
+                                        "{ip}|{path}: Error Writing response: {}",
                                         error.to_string()
                                     );
                                 } else {
                                     //clear buffer
-                                    tracing::trace!("Wrote response, clearing request buffer");
+                                    tracing::trace!(
+                                        "{ip}|{path}: Wrote response, clearing request buffer"
+                                    );
                                     request_bytes.clear();
                                 }
                                 drop(r);
@@ -214,20 +213,23 @@ where
                                 }
                                 _ => {
                                     let error_res = format!("400 bad request: {}", e);
-                                    tracing::debug!("{}", error_res);
+                                    tracing::debug!("{ip}: {}", error_res);
                                     let response = Response::error(
                                         http::StatusCode::ErrBadRequest,
                                         error_res.into(),
                                     );
                                     if let Err(err) = connection.write_response(response).await {
-                                        tracing::error!("Error Writing Data: {}", err.to_string());
+                                        tracing::error!(
+                                            "{ip}: Error Writing Data: {}",
+                                            err.to_string()
+                                        );
                                     }
                                 }
                             },
                         }
                     }
                     Err(err) => {
-                        tracing::error!("Socket read error: {}", err.to_string());
+                        tracing::error!("{ip}: Socket read error: {}", err.to_string());
                         break;
                     }
                 }
