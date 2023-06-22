@@ -183,7 +183,7 @@ where
                                 tracing::trace!("Got lock, getting response");
                                 let response =
                                     router_locked.route(&r, connection.virtual_hosts()).await;
-                                tracing::trace!("Writing Response: {:#?}", response);
+                                tracing::trace!("Writing Response");
                                 if let Err(error) = connection.write_response(response).await {
                                     // not clearing string here so we can try
                                     // again, otherwise might be terminated
