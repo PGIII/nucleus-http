@@ -175,7 +175,12 @@ where
                         match request_result {
                             Ok(r) => {
                                 let path = r.path();
-                                tracing::info!("{ip}: {} Request for: {}", r.method(), path,);
+                                tracing::info!(
+                                    "{ip}: {} {} Request for: {}",
+                                    r.method(),
+                                    r.version(),
+                                    path
+                                );
                                 tracing::trace!("{ip}|{path}: Getting Router lock");
                                 let router_locked = router.read().await;
                                 tracing::trace!("{ip}|{path}: Got lock, getting response");
