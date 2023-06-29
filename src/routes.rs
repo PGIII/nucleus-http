@@ -78,6 +78,7 @@ where
         routes_locked[*route.method()].insert(route.path.clone(), route);
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     pub fn routes(&self) -> Routes<S> {
         Arc::clone(&self.routes)
     }
@@ -155,6 +156,7 @@ where
                 }
             }
         } else if let Some(host_dir) = Self::get_vhost_dir(request, vhosts).await {
+            tracing::debug!("Trying static file serve");
             let mut file_path = PathBuf::from(request.path());
             if file_path.is_absolute() {
                 if let Ok(path) = file_path.strip_prefix("/") {
@@ -171,21 +173,25 @@ where
         }
     }
 
+    #[tracing::instrument(level = "debug")]
     async fn get_file(path: PathBuf) -> Response {
         match tokio::fs::read(&path).await {
             Ok(contents) => {
                 let mime: MimeType = path.into();
                 Response::new(http::StatusCode::OK, contents, mime)
             }
-            Err(err) => match err.kind() {
-                std::io::ErrorKind::PermissionDenied => {
-                    Response::error(http::StatusCode::ErrForbidden, "Permission Denied".into())
+            Err(err) => {
+                tracing::warn!("static load error:{}", err.to_string());
+                match err.kind() {
+                    std::io::ErrorKind::PermissionDenied => {
+                        Response::error(http::StatusCode::ErrForbidden, "Permission Denied".into())
+                    }
+                    _ => Response::error(
+                        http::StatusCode::ErrNotFound,
+                        "Static File Not Found".into(),
+                    ),
                 }
-                _ => Response::error(
-                    http::StatusCode::ErrNotFound,
-                    "Static File Not Found".into(),
-                ),
-            },
+            }
         }
     }
     async fn get_vhost_dir(
