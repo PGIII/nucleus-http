@@ -41,7 +41,7 @@ pub struct Server<S> {
 trait Stream: AsyncWrite + AsyncRead + Unpin + Send + Sync {}
 
 // Auto Implement Stream for all types that implent asyncRead + asyncWrite
-impl<T> Stream for T where T: AsyncRead + AsyncWrite + Unpin + Send + Sync {}
+impl<T> Stream for T where T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync {}
 
 pub struct Connection {
     stream: Box<dyn Stream>,
@@ -199,8 +199,10 @@ where
                                         "{ip}|{path}: Wrote response, clearing request buffer"
                                     );
                                     request_bytes.clear();
+                                    tracing::info!("Shutting Down");
+                                    connection.stream.shutdown().await.expect("Shutdown Error");
+                                    return;
                                 }
-                                drop(r);
                             }
                             Err(e) => match e {
                                 request::Error::InvalidString
