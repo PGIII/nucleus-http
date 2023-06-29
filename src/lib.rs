@@ -198,10 +198,8 @@ where
                                     tracing::trace!(
                                         "{ip}|{path}: Wrote response, clearing request buffer"
                                     );
+                                    connection.stream.flush().await.expect("Error flushing");
                                     request_bytes.clear();
-                                    tracing::info!("Shutting Down");
-                                    connection.stream.shutdown().await.expect("Shutdown Error");
-                                    return;
                                 }
                             }
                             Err(e) => match e {
