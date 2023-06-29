@@ -181,12 +181,10 @@ where
                                     r.version(),
                                     path
                                 );
-                                tracing::trace!("{ip}|{path}: Getting Router lock");
                                 let router_locked = router.read().await;
-                                tracing::trace!("{ip}|{path}: Got lock, getting response");
                                 let response =
                                     router_locked.route(&r, connection.virtual_hosts()).await;
-                                tracing::trace!("{ip}|{path}: Writing Response");
+                                tracing::debug!("{ip}|{path}: Writing Response");
                                 if let Err(error) = connection.write_response(response).await {
                                     // not clearing string here so we can try
                                     // again, otherwise might be terminated
@@ -240,6 +238,7 @@ where
                     }
                 }
             }
+            tracing::debug!("{ip} Done Serving Connection");
         };
 
         tokio::spawn(async move {

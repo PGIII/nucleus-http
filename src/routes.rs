@@ -175,7 +175,6 @@ where
         match tokio::fs::read(&path).await {
             Ok(contents) => {
                 let mime: MimeType = path.into();
-
                 Response::new(http::StatusCode::OK, contents, mime)
             }
             Err(err) => match err.kind() {
