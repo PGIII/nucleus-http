@@ -214,7 +214,7 @@ where
                                 }
                                 _ => {
                                     let error_res = format!("400 bad request: {}", e);
-                                    tracing::debug!("{ip}: {}", error_res);
+                                    tracing::warn!("{ip}: {}", error_res);
                                     let response = Response::error(
                                         http::StatusCode::ErrBadRequest,
                                         error_res.into(),
