@@ -37,7 +37,7 @@ impl Response {
             mime,
             body,
             version,
-            headers: Header::new_server(),
+            headers: vec![],
         }
     }
 
@@ -49,7 +49,7 @@ impl Response {
             body,
             version,
             mime,
-            headers: Header::new_server(),
+            headers: vec![],
         }
     }
 
@@ -95,6 +95,10 @@ impl Response {
     pub fn status(&self) -> StatusCode {
         self.status
     }
+
+    pub fn mime(&self) -> MimeType {
+        self.mime
+    }
 }
 
 impl From<Vec<u8>> for Response {
@@ -104,7 +108,7 @@ impl From<Vec<u8>> for Response {
             body: bytes,
             mime: MimeType::Binary,
             version: Version::V1_1,
-            headers: Header::new_server(),
+            headers: vec![],
         }
     }
 }
@@ -116,7 +120,7 @@ impl From<String> for Response {
             body: string.into(),
             mime: MimeType::HTML,
             version: Version::V1_1,
-            headers: Header::new_server(),
+            headers: vec![],
         }
     }
 }
@@ -128,7 +132,7 @@ impl From<&str> for Response {
             body: string.into(),
             mime: MimeType::HTML,
             version: Version::V1_1,
-            headers: Header::new_server(),
+            headers: vec![],
         }
     }
 }
@@ -142,7 +146,7 @@ impl From<anyhow::Error> for Response {
             body: message.into(),
             mime: MimeType::HTML,
             version: Version::V1_1,
-            headers: Header::new_server(),
+            headers: vec![],
         }
     }
 }
@@ -185,7 +189,7 @@ impl From<std::io::Error> for Response {
             body: error.to_string().into(),
             mime: MimeType::HTML,
             version: Version::V1_1,
-            headers: Header::new_server(),
+            headers: vec![],
         }
     }
 }

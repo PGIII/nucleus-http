@@ -87,6 +87,12 @@ impl IntoHeader for Header {
     }
 }
 
+impl IntoHeader for &Header {
+    fn into_header(self) -> Header {
+        self.clone()
+    }
+}
+
 impl IntoHeader for (&str, &str) {
     fn into_header(self) -> Header {
         let (key, value) = self;

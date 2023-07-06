@@ -1,5 +1,5 @@
 use crate::{
-    http::{self, Method, MimeType},
+    http::{self, Header, Method, MimeType},
     request::Request,
     response::{IntoResponse, Response},
     state::{FromRequest, State},
@@ -12,6 +12,7 @@ use std::{
     future::Future,
     path::{Path, PathBuf},
     sync::Arc,
+    vec,
 };
 use tokio::sync::RwLock;
 
@@ -57,12 +58,15 @@ pub type Routes<R> = Arc<RwLock<EnumMap<Method, HashMap<String, Route<R>>>>>;
 pub struct Router<S> {
     routes: Routes<S>,
     state: State<S>,
+    mime_headers: Vec<(MimeType, Header)>,
+    default_headers: Vec<Header>,
 }
 
 impl<S> Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
+    #[tracing::instrument(level = "debug", skip(state))]
     pub fn new(state: S) -> Self {
         let map = enum_map! {
             crate::routes::Method::GET | crate::routes::Method::POST => HashMap::new(),
@@ -70,9 +74,12 @@ where
         Router {
             routes: Arc::new(RwLock::new(map)),
             state: State(state),
+            mime_headers: vec![],
+            default_headers: Header::new_server(), // default server headers. server sw name
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(self, route))]
     pub async fn add_route(&mut self, route: Route<S>) {
         let mut routes_locked = self.routes.write().await;
         routes_locked[*route.method()].insert(route.path.clone(), route);
@@ -81,6 +88,35 @@ where
     #[tracing::instrument(level = "debug", skip(self))]
     pub fn routes(&self) -> Routes<S> {
         Arc::clone(&self.routes)
+    }
+
+    /// Add header to all responses
+    #[tracing::instrument(level = "debug", skip(self))]
+    pub fn add_default_header(&mut self, header: Header) {
+        self.default_headers.push(header);
+    }
+
+    /// Add a header that will be added to every response of this mime type
+    #[tracing::instrument(level = "debug", skip(self))]
+    pub fn add_mime_header(&mut self, header: Header, mime: MimeType) {
+        self.mime_headers.push((mime, header));
+    }
+
+    /// Add default and mime headers to req
+    #[tracing::instrument(level = "debug", skip(self))]
+    fn push_headers(&self, response: &mut Response) {
+        //FIXME: Do we need to worry about duplicates ?
+        //add default headers first then mime specific ones
+        for header in &self.default_headers {
+            response.add_header(header);
+        }
+
+        let mime = response.mime();
+        for (key, header) in &self.mime_headers {
+            if key == &mime {
+                response.add_header(header);
+            }
+        }
     }
 
     pub fn new_routes() -> Routes<S> {
@@ -131,7 +167,9 @@ where
                 RouteResolver::Static { file_path } => {
                     if let Some(host_dir) = Self::get_vhost_dir(request, vhosts.clone()).await {
                         let path = host_dir.join(file_path);
-                        Self::get_file(path).await
+                        let mut res = Self::get_file(path).await;
+                        self.push_headers(&mut res);
+                        res
                     } else {
                         Response::error(http::StatusCode::ErrNotFound, "File Not Found".into())
                     }
@@ -142,17 +180,23 @@ where
                         vec![],
                         MimeType::PlainText,
                     );
+                    self.push_headers(&mut response);
                     response.add_header(("Location", redirect_to));
                     response
                 }
                 RouteResolver::Function(resolver) => {
                     let resolver = resolver.clone();
-                    resolver
+                    let mut response = resolver
                         .resolve(self.state.clone(), request.to_owned())
-                        .await
+                        .await;
+                    self.push_headers(&mut response);
+                    response
                 }
                 RouteResolver::Embed(body, mime_type) => {
-                    Response::new(http::StatusCode::OK, body.to_vec(), *mime_type)
+                    let mut response =
+                        Response::new(http::StatusCode::OK, body.to_vec(), *mime_type);
+                    self.push_headers(&mut response);
+                    response
                 }
             }
         } else if let Some(host_dir) = Self::get_vhost_dir(request, vhosts).await {
@@ -162,14 +206,22 @@ where
                 if let Ok(path) = file_path.strip_prefix("/") {
                     file_path = path.to_path_buf();
                 } else {
-                    return Response::error(http::StatusCode::ErrNotFound, "File Not Found".into());
+                    let mut response =
+                        Response::error(http::StatusCode::ErrNotFound, "File Not Found".into());
+                    self.push_headers(&mut response);
+                    return response;
                 }
             }
             let final_path = host_dir.join(file_path);
-            return Self::get_file(final_path).await;
+            let mut response = Self::get_file(final_path).await;
+            self.push_headers(&mut response);
+            response
         } else {
             //no route try static serve
-            Response::error(http::StatusCode::ErrNotFound, "File Not Found".into())
+            let mut response =
+                Response::error(http::StatusCode::ErrNotFound, "File Not Found".into());
+            self.push_headers(&mut response);
+            response
         }
     }
 
@@ -359,7 +411,8 @@ mod tests {
         router.add_route(Route::get_static("/", "index.html")).await;
 
         let file = tokio::fs::read_to_string("./index.html").await.unwrap();
-        let expected = Response::from(file);
+        let mut expected = Response::from(file);
+        router.push_headers(&mut expected); 
         assert_eq!(http::StatusCode::OK, expected.status());
 
         let response = router.route(&request, vhosts.clone()).await;
@@ -384,7 +437,8 @@ mod tests {
         let mut router = Router::new(());
         router.add_route(Route::get("/", hello)).await;
 
-        let expected = Response::from("hello");
+        let mut expected = Response::from("hello");
+        router.push_headers(&mut expected);
         assert_eq!(http::StatusCode::OK, expected.status());
 
         let response = router.route(&request, vhosts.clone()).await;
@@ -402,7 +456,8 @@ mod tests {
         let mut router = Router::new(());
         router.add_route(Route::get("/*", dynamic)).await;
 
-        let expected = Response::from("Hello /bob");
+        let mut expected = Response::from("Hello /bob");
+        router.push_headers(&mut expected);
         assert_eq!(http::StatusCode::OK, expected.status());
 
         let request =
