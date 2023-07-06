@@ -198,8 +198,14 @@ where
                                     tracing::trace!(
                                         "{ip}|{path}: Wrote response, clearing request buffer"
                                     );
-                                    connection.stream.flush().await.expect("Error flushing");
-                                    request_bytes.clear();
+                                    if r.keep_alive() {
+                                        connection.stream.flush().await.expect("Error flushing");
+                                        request_bytes.clear();
+                                    } else {
+                                        tracing::debug!("{ip}|{path}: Shutting down Stream, no keep alive");
+                                        connection.stream.shutdown().await.expect("Error Shutting down stream");
+                                        return;
+                                    }
                                 }
                             }
                             Err(e) => match e {

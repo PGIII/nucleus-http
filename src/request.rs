@@ -24,6 +24,7 @@ pub struct Request {
     headers: HashMap<String, String>,
     body: Vec<u8>,
     form_data: FormTypes,
+    keep_alive: bool,
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -317,6 +318,10 @@ impl Request {
         return headers.get(&lower).cloned();
     }
 
+    pub fn keep_alive(&self) -> bool {
+        self.keep_alive
+    }
+
     pub fn from_lines(lines: &Vec<&str>) -> Result<Request, Error> {
         let mut headers = HashMap::new();
         let host;
@@ -373,6 +378,7 @@ impl Request {
             return Err(Error::NoHostHeader);
         }
         //last is optional headers
+        let keep_alive = Self::determine_keep_alive(version, headers.get("connection"));
         Ok(Request {
             method,
             version,
@@ -382,6 +388,7 @@ impl Request {
             query_string,
             body,
             form_data,
+            keep_alive,
         })
     }
 
@@ -398,7 +405,7 @@ impl Request {
             let mut req_header_lines = memmem::find_iter(&req_header, "\r\n");
             if let Some(i) = req_header_lines.next() {
                 let url;
-                let mut headers = HashMap::new();
+                let mut headers = HashMap::new(); 
                 let host;
                 let mut query_string = None;
                 let mut form_data = FormTypes::None;
@@ -499,6 +506,7 @@ impl Request {
                         _ => {}
                     }
                 }
+                let keep_alive = Self::determine_keep_alive(version, headers.get("connection"));
                 Ok(Request {
                     method,
                     version,
@@ -508,6 +516,7 @@ impl Request {
                     query_string,
                     body: req_body.to_vec(),
                     form_data,
+                    keep_alive,
                 })
             } else {
                 //no headers, we need at least the host header
@@ -529,6 +538,23 @@ impl Request {
 
     pub fn form_data(&self) -> &FormTypes {
         &self.form_data
+    }
+    
+    /// determin if request wants to keep connection alive
+    /// if connection header present this value is controlled by that
+    /// otherwise determined by default behavior for version passed
+    fn determine_keep_alive(version: Version, connection_header: Option<&String>) -> bool {
+        if let Some(conn) = connection_header {
+            conn.to_lowercase() == "keep-alive"
+        } else {
+            // no conncection header so use version default 
+            match version {
+                Version::V0_9 => false,
+                Version::V1_0 => false,
+                Version::V1_1 => true,
+                Version::V2_0 => true,
+            }
+        }
     }
 }
 
@@ -560,6 +586,7 @@ mod tests {
             host: "foo.example".to_string(),
             query_string: None,
             form_data: FormTypes::XUrlEncoded(map),
+            keep_alive: true,
         };
         let request_str = Bytes::from_static(
             b"POST /test HTTP/1.1\r\n\
@@ -594,6 +621,7 @@ mod tests {
             host: "foo.example".to_string(),
             query_string: None,
             form_data: FormTypes::MultiPart(map),
+            keep_alive: true,
         };
         let request_str = Bytes::from_static(
             b"POST /test HTTP/1.1\r\n\
@@ -642,6 +670,7 @@ mod tests {
             host: "test".to_string(),
             query_string: None,
             form_data: FormTypes::None,
+            keep_alive: true,
         };
         let request =
             Request::from_bytes(Bytes::from_static(b"GET / HTTP/1.1\r\nHost: test\r\n\r\n"))
@@ -660,6 +689,7 @@ mod tests {
             host: "test".to_string(),
             query_string: Some("test=true".to_string()),
             form_data: FormTypes::None,
+            keep_alive: true,
         };
         let request = Request::from_bytes(Bytes::from_static(
             b"GET /index.html?test=true HTTP/1.1\r\nHost: test\r\n\r\n",
@@ -683,6 +713,7 @@ mod tests {
             host: "test".to_string(),
             query_string: None,
             form_data: FormTypes::None,
+            keep_alive: true,
         };
         let request = Request::from_string(
             "GET / HTTP/1.1\r\nhost: test\r\nheader1: hi\r\nheader2: Bye\r\n\r\n".to_owned(),
@@ -695,13 +726,9 @@ mod tests {
     fn empty_string() {
         let request = Request::from_string("".to_owned());
         if let Err(error) = request {
-            if error == Error::InvalidString {
-                assert!(true);
-            } else {
-                assert!(false);
-            }
+            assert!(error == Error::InvalidString);
         } else {
-            assert!(false);
+            panic!("No error");
         }
     }
 }

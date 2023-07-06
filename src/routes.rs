@@ -412,7 +412,7 @@ mod tests {
 
         let file = tokio::fs::read_to_string("./index.html").await.unwrap();
         let mut expected = Response::from(file);
-        router.push_headers(&mut expected); 
+        router.push_headers(&mut expected);
         assert_eq!(http::StatusCode::OK, expected.status());
 
         let response = router.route(&request, vhosts.clone()).await;
