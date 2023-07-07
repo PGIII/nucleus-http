@@ -14,7 +14,13 @@ use bytes::{BufMut, BytesMut};
 
 use response::Response;
 use routes::Router;
-use std::{path::Path, sync::Arc, vec};
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    path::{Path, PathBuf},
+    sync::Arc,
+    vec,
+};
 use tokio::{
     self,
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
@@ -34,8 +40,9 @@ pub struct Server<S> {
     listener: TcpListener,
     acceptor: Option<TlsAcceptor>,
     router: Arc<RwLock<Router<S>>>,
-    virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
+    virtual_hosts: Arc<RwLock<HashMap<String, virtual_host::VirtualHost<S>>>>,
     cancel: CancellationToken,
+    doc_root: PathBuf,
 }
 
 trait Stream: AsyncWrite + AsyncRead + Unpin + Send + Sync {}
@@ -46,15 +53,9 @@ impl<T> Stream for T where T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync
 pub struct Connection {
     stream: Box<dyn Stream>,
     client_ip: std::net::SocketAddr,
-    virtual_hosts: Arc<RwLock<Vec<virtual_host::VirtualHost>>>,
 }
 
 impl Connection {
-    #[tracing::instrument(level = "debug", skip(self))]
-    pub fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>> {
-        self.virtual_hosts.clone()
-    }
-
     #[tracing::instrument(level = "debug", skip(self))]
     pub async fn write_all(&mut self, src: &[u8]) -> tokio::io::Result<()> {
         self.stream.write_all(src).await?;
@@ -75,14 +76,19 @@ where
     S: Clone + Send + Sync + 'static,
 {
     #[tracing::instrument(level = "debug", skip(router))]
-    pub async fn bind(ip: &str, router: Router<S>) -> Result<Self, tokio::io::Error> {
+    pub async fn bind(
+        ip: &str,
+        router: Router<S>,
+        doc_root: impl AsRef<Path> + Debug,
+    ) -> Result<Self, tokio::io::Error> {
         let listener = tokio::net::TcpListener::bind(ip).await?;
         Ok(Server {
             listener,
             router: Arc::new(RwLock::new(router)),
-            virtual_hosts: Arc::new(RwLock::new(vec![])),
+            virtual_hosts: Arc::new(RwLock::new(HashMap::new())),
             acceptor: None,
             cancel: CancellationToken::new(),
+            doc_root: PathBuf::from(doc_root.as_ref()),
         })
     }
 
@@ -92,6 +98,7 @@ where
         cert: &Path,
         key: &Path,
         router: Router<S>,
+        doc_root: impl AsRef<Path> + Debug,
     ) -> Result<Self, anyhow::Error> {
         let files = vec![cert, key];
         let context = format!("Opening: {:#?}, {:#?}", cert, key);
@@ -108,22 +115,23 @@ where
         Ok(Server {
             listener,
             router: Arc::new(RwLock::new(router)),
-            virtual_hosts: Arc::new(RwLock::new(vec![])),
+            virtual_hosts: Arc::new(RwLock::new(HashMap::new())),
             acceptor: Some(acceptor),
             cancel: CancellationToken::new(),
+            doc_root: PathBuf::from(doc_root.as_ref()),
         })
     }
 
     #[tracing::instrument(level = "debug", skip(self))]
-    pub fn virtual_hosts(&self) -> Arc<RwLock<Vec<virtual_host::VirtualHost>>> {
+    pub fn virtual_hosts(&self) -> Arc<RwLock<HashMap<String, virtual_host::VirtualHost<S>>>> {
         self.virtual_hosts.clone()
     }
 
     #[tracing::instrument(level = "debug", skip(self, virtual_host))]
-    pub async fn add_virtual_host(&mut self, virtual_host: virtual_host::VirtualHost) {
+    pub async fn add_virtual_host(&mut self, virtual_host: virtual_host::VirtualHost<S>) {
         let virtual_hosts = self.virtual_hosts();
         let mut locked = virtual_hosts.write().await;
-        locked.push(virtual_host);
+        locked.insert(virtual_host.hostname().to_string(), virtual_host);
     }
 
     #[tracing::instrument(level = "debug", skip(self))]
@@ -135,7 +143,6 @@ where
                 Ok(s) => Ok(Connection {
                     client_ip,
                     stream: Box::new(tokio_rustls::TlsStream::Server(s)),
-                    virtual_hosts: self.virtual_hosts(),
                 }),
                 Err(_) => Err(tokio::io::Error::new(
                     tokio::io::ErrorKind::Other,
@@ -146,7 +153,6 @@ where
             Ok(Connection {
                 client_ip,
                 stream: Box::new(stream),
-                virtual_hosts: self.virtual_hosts(),
             })
         }
     }
@@ -155,6 +161,8 @@ where
     fn serve_connection(&self, mut connection: Connection) -> JoinHandle<()> {
         let router = self.router.clone();
         let token = self.cancel.clone();
+        let doc_root = self.doc_root.clone();
+        let vhosts = self.virtual_hosts();
         let ip = connection.client_ip;
         let read_loop = async move {
             let mut request_bytes = BytesMut::with_capacity(1024);
@@ -175,15 +183,21 @@ where
                         match request_result {
                             Ok(r) => {
                                 let path = r.path();
+                                let host = r.hostname();
                                 tracing::info!(
                                     "{ip}: {} {} Request for: {}",
                                     r.method(),
                                     r.version(),
                                     path
                                 );
+
+                                let html_path = if let Some(vhost) = vhosts.read().await.get(host) {
+                                    vhost.root_dir().clone()
+                                } else {
+                                    doc_root.clone()
+                                };
                                 let router_locked = router.read().await;
-                                let response =
-                                    router_locked.route(&r, connection.virtual_hosts()).await;
+                                let response = router_locked.route(&r, &html_path).await;
                                 tracing::debug!("{ip}|{path}: Writing Response");
                                 if let Err(error) = connection.write_response(response).await {
                                     // not clearing string here so we can try
@@ -202,8 +216,14 @@ where
                                         connection.stream.flush().await.expect("Error flushing");
                                         request_bytes.clear();
                                     } else {
-                                        tracing::debug!("{ip}|{path}: Shutting down Stream, no keep alive");
-                                        connection.stream.shutdown().await.expect("Error Shutting down stream");
+                                        tracing::debug!(
+                                            "{ip}|{path}: Shutting down Stream, no keep alive"
+                                        );
+                                        connection
+                                            .stream
+                                            .shutdown()
+                                            .await
+                                            .expect("Error Shutting down stream");
                                         return;
                                     }
                                 }
