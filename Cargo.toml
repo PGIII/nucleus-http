@@ -2,6 +2,13 @@
 name = "nucleus-http"
 version = "0.11.0"
 edition = "2021"
+license = "MIT"
+description = "Web Framework/Server"
+keywords = ["async", "web", "api"]
+categories = ["network-programming"]
+readme = "README.md"
+repository = "https://github.com/PGIII/nucleus-http"
+exclude = [".vscode/*"]
 
 [profile.release]
 debug = 1
