@@ -1,7 +1,5 @@
-use anyhow;
 use get_port::tcp::TcpPort;
 use get_port::{Ops, Range};
-use log;
 use nucleus_http::cookies::CookieConfig;
 use nucleus_http::http;
 use nucleus_http::response::Response;
@@ -11,10 +9,8 @@ use nucleus_http::{
     virtual_host::VirtualHost,
     Server,
 };
-use pretty_env_logger;
 use std::format;
 use std::sync::{Arc, RwLock};
-use tokio;
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -36,7 +32,6 @@ pub async fn launch_dev_server() -> u16 {
     .unwrap();
     let listener_ip = format!("0.0.0.0:{}", tcp_port);
     log::info!("Listening on {listener_ip}");
-    let localhost_vhost = VirtualHost::new("localhost", &listener_ip, "./");
 
     let state = AppState {
         greeting: "HI".to_owned(),
@@ -54,8 +49,7 @@ pub async fn launch_dev_server() -> u16 {
     //router.add_route(Route::get_state("/req", print_req)).await;
     router.add_route(Route::get("/hello", get)).await;
     router.add_route(Route::get_static("/", "index.html")).await;
-    let mut server = Server::bind(&listener_ip, router).await.unwrap();
-    server.add_virtual_host(localhost_vhost).await;
+    let server = Server::bind(&listener_ip, router, "./").await.unwrap();
     tokio::spawn(async move { server.serve().await.expect("Server Shutdown") });
     return tcp_port;
 }

@@ -1,10 +1,8 @@
 mod common;
 use get_port::tcp::TcpPort;
 use get_port::{Ops, Range};
-use log;
 use nucleus_http::{
     routes::{Route, Router},
-    virtual_host::VirtualHost,
     Server,
 };
 use std::format;
@@ -22,12 +20,10 @@ async fn redirect_all() {
     .unwrap();
     let listener_ip = format!("0.0.0.0:{}", tcp_port);
     log::info!("Listening on {listener_ip}");
-    let localhost_vhost = VirtualHost::new("localhost", &listener_ip, "./");
 
     let mut router = Router::new(());
     router.add_route(Route::redirect_all("/index.html")).await;
-    let mut server = Server::bind(&listener_ip, router).await.unwrap();
-    server.add_virtual_host(localhost_vhost).await;
+    let server = Server::bind(&listener_ip, router, "./").await.unwrap();
     tokio::spawn(async move { server.serve().await.expect("Server Shutdown") });
 
     let url = format!("http://localhost:{}/", tcp_port);

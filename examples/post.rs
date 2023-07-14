@@ -1,17 +1,12 @@
-use std::{convert::Infallible, sync::Arc};
-use tokio::sync::RwLock;
-
-use log;
 use nucleus_http::{
     http,
     request::{FormTypes, Request},
     response::Response,
     routes::{Route, Router},
-    virtual_host::VirtualHost,
     Server,
 };
-use pretty_env_logger;
-use tokio;
+use std::{convert::Infallible, sync::Arc};
+use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
 struct AppState {
@@ -27,7 +22,6 @@ async fn main() -> tokio::io::Result<()> {
     pretty_env_logger::init();
     let listener_ip = "0.0.0.0:7878";
     log::info!("Listening on {listener_ip}");
-    let localhost_vhost = VirtualHost::new("localhost", "0.0.0.0:7878", "./");
 
     let state = AppState {
         greeting: "HI".to_owned(),
@@ -48,11 +42,9 @@ async fn main() -> tokio::io::Result<()> {
         .add_route(Route::post("/multipart_form", multipart))
         .await;
 
-    let mut server = Server::bind(listener_ip, router).await?;
-    server.add_virtual_host(localhost_vhost).await;
-
+    let server = Server::bind(listener_ip, router, "./").await?;
     server.serve().await.unwrap();
-    return Ok(());
+    Ok(())
 }
 
 async fn print_greeting(state: AppState, request: Request) -> Result<String, String> {
@@ -65,9 +57,8 @@ async fn print_greeting(state: AppState, request: Request) -> Result<String, Str
         state.bye,
         views_write
     );
-    *views_write = *views_write + 1;
-    drop(views_write);
-    return Ok(response);
+    *views_write += 1;
+    Ok(response)
 }
 
 async fn get(_: AppState, _: Request) -> Result<String, String> {
@@ -89,9 +80,9 @@ async fn post(state: AppState, req: Request) -> Result<Response, Infallible> {
         http::MimeType::PlainText,
     );
     let body_string = String::from_utf8_lossy(req.body());
-    let params: Vec<_> = body_string.split("&").collect();
+    let params: Vec<_> = body_string.split('&').collect();
     for param in params {
-        let split: Vec<_> = param.split("=").collect();
+        let split: Vec<_> = param.split('=').collect();
         if split[0] == "fname" {
             let name = state.first_name.clone();
             let mut name_locked = name.write().await;
@@ -106,7 +97,7 @@ async fn post(state: AppState, req: Request) -> Result<Response, Infallible> {
     Ok(res)
 }
 
-async fn multipart(state: AppState, req: Request) -> Result<Response, Infallible> {
+async fn multipart(_: AppState, req: Request) -> Result<Response, Infallible> {
     match req.form_data() {
         FormTypes::MultiPart(f) => {
             if let Some(file_entry) = f.get("cover_image") {

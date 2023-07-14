@@ -3,7 +3,6 @@ use crate::{
     request::Request,
     response::{IntoResponse, Response},
     state::{FromRequest, State},
-    virtual_host::VirtualHost,
 };
 use async_trait::async_trait;
 use enum_map::{enum_map, EnumMap};
@@ -126,12 +125,8 @@ where
         Arc::new(RwLock::new(map))
     }
 
-    #[tracing::instrument(level = "debug", skip(self, vhosts))]
-    pub async fn route(
-        &self,
-        request: &Request,
-        vhosts: Arc<RwLock<Vec<VirtualHost>>>,
-    ) -> Response {
+    #[tracing::instrument(level = "debug", skip(self, doc_root))]
+    pub async fn route(&self, request: &Request, doc_root: impl AsRef<Path>) -> Response {
         let routes = self.routes();
         let routes_locked = &routes.read().await[*request.method()];
         let mut matching_route = None;
@@ -165,14 +160,10 @@ where
             tracing::debug!("Found matching route");
             match route.resolver() {
                 RouteResolver::Static { file_path } => {
-                    if let Some(host_dir) = Self::get_vhost_dir(request, vhosts.clone()).await {
-                        let path = host_dir.join(file_path);
-                        let mut res = Self::get_file(path).await;
-                        self.push_headers(&mut res);
-                        res
-                    } else {
-                        Response::error(http::StatusCode::ErrNotFound, "File Not Found".into())
-                    }
+                    let path = doc_root.as_ref().join(file_path);
+                    let mut res = Self::get_file(path).await;
+                    self.push_headers(&mut res);
+                    res
                 }
                 RouteResolver::Redirect(redirect_to) => {
                     let mut response = Response::new(
@@ -199,7 +190,7 @@ where
                     response
                 }
             }
-        } else if let Some(host_dir) = Self::get_vhost_dir(request, vhosts).await {
+        } else {
             tracing::debug!("Trying static file serve");
             let mut file_path = PathBuf::from(request.path());
             if file_path.is_absolute() {
@@ -212,14 +203,8 @@ where
                     return response;
                 }
             }
-            let final_path = host_dir.join(file_path);
+            let final_path = doc_root.as_ref().join(file_path);
             let mut response = Self::get_file(final_path).await;
-            self.push_headers(&mut response);
-            response
-        } else {
-            //no route try static serve
-            let mut response =
-                Response::error(http::StatusCode::ErrNotFound, "File Not Found".into());
             self.push_headers(&mut response);
             response
         }
@@ -245,17 +230,6 @@ where
                 }
             }
         }
-    }
-    async fn get_vhost_dir(
-        request: &Request,
-        vhosts: Arc<RwLock<Vec<VirtualHost>>>,
-    ) -> Option<PathBuf> {
-        for vhost in &*vhosts.read().await {
-            if vhost.hostname() == request.hostname() {
-                return Some(vhost.root_dir().to_path_buf());
-            }
-        }
-        None
     }
 }
 
@@ -405,8 +379,6 @@ mod tests {
         let request =
             Request::from_string("GET /index.html HTTP/1.1\r\nHost: localhost\r\n\r\n".to_owned())
                 .unwrap();
-        let vhost = VirtualHost::new("localhost", "", "./");
-        let vhosts = Arc::new(RwLock::new(vec![vhost]));
         let mut router = Router::new(());
         router.add_route(Route::get_static("/", "index.html")).await;
 
@@ -415,12 +387,12 @@ mod tests {
         router.push_headers(&mut expected);
         assert_eq!(http::StatusCode::OK, expected.status());
 
-        let response = router.route(&request, vhosts.clone()).await;
+        let response = router.route(&request, "./").await;
         assert_eq!(expected, response);
 
         let request =
             Request::from_string("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".to_owned()).unwrap();
-        let response = router.route(&request, vhosts.clone()).await;
+        let response = router.route(&request, "./").await;
         assert_eq!(expected, response);
     }
 
@@ -432,8 +404,6 @@ mod tests {
     async fn route_basic() {
         let request =
             Request::from_string("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".to_owned()).unwrap();
-        let vhost = VirtualHost::new("localhost", "", "./");
-        let vhosts = Arc::new(RwLock::new(vec![vhost]));
         let mut router = Router::new(());
         router.add_route(Route::get("/", hello)).await;
 
@@ -441,7 +411,7 @@ mod tests {
         router.push_headers(&mut expected);
         assert_eq!(http::StatusCode::OK, expected.status());
 
-        let response = router.route(&request, vhosts.clone()).await;
+        let response = router.route(&request, "./").await;
         assert_eq!(expected, response);
     }
 
@@ -451,8 +421,6 @@ mod tests {
 
     #[tokio::test]
     async fn route_dynamic() {
-        let vhost = VirtualHost::new("localhost", "", "./");
-        let vhosts = Arc::new(RwLock::new(vec![vhost]));
         let mut router = Router::new(());
         router.add_route(Route::get("/*", dynamic)).await;
 
@@ -463,7 +431,7 @@ mod tests {
         let request =
             Request::from_string("GET /bob HTTP/1.1\r\nHost: localhost\r\n\r\n".to_owned())
                 .unwrap();
-        let response = router.route(&request, vhosts.clone()).await;
+        let response = router.route(&request, "./").await;
         assert_eq!(expected, response);
     }
 }

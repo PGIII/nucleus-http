@@ -1,18 +1,23 @@
 use std::path::PathBuf;
 
-pub struct VirtualHost {
-    hostname: String, 
-    //ip: String,
+use crate::{request::Request, response::Response, routes::Router};
+
+pub struct VirtualHost<S> {
+    hostname: String,
     root_dir: PathBuf, // root dir for static files, eg. /var/www/default
+    router: Router<S>,
 }
 
-impl VirtualHost {
-    pub fn new(hostname: &str, _ip: &str, root_dir: &str) -> VirtualHost {
-        
-        VirtualHost {
+impl<S> VirtualHost<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    pub fn new(hostname: &str, _ip: &str, root_dir: &str, router: Router<S>) -> Self {
+        Self {
             hostname: hostname.to_string(),
             //ip: ip.to_string(),
             root_dir: PathBuf::from(root_dir),
+            router,
         }
     }
 
@@ -22,5 +27,9 @@ impl VirtualHost {
 
     pub fn root_dir(&self) -> &PathBuf {
         &self.root_dir
+    }
+
+    pub async fn route(&self, request: &Request) -> Response {
+        self.router.route(request, &self.root_dir).await
     }
 }

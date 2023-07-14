@@ -1,16 +1,12 @@
 use argh::FromArgs;
-use log;
 use nucleus_http::{
     request::Request,
     routes::{Route, Router},
-    virtual_host::VirtualHost,
     Server,
 };
-use pretty_env_logger;
 use std::io;
 use std::net::ToSocketAddrs;
 use std::path::PathBuf;
-use tokio;
 
 /// Tokio Rustls server example
 #[derive(FromArgs)]
@@ -51,19 +47,15 @@ async fn main() -> anyhow::Result<()> {
 
     let listener_ip = &tls_addr.to_string();
     log::info!("Listening on {listener_ip}");
-    let localhost_vhost = VirtualHost::new("localhost", listener_ip, "./");
 
-    let state = ();
-    let mut router = Router::new(state);
+    let mut router = Router::new(());
     router
         .add_route(Route::get("/async", Box::new(async_get)))
         .await;
     router.add_route(Route::get("/sync", Box::new(get))).await;
     router.add_route(Route::get_static("/", "index.html")).await;
 
-    let mut server = Server::bind_tls(listener_ip, &options.cert, &options.key, router).await?;
-    server.add_virtual_host(localhost_vhost).await;
-
+    let server = Server::bind_tls(listener_ip, &options.cert, &options.key, router, "./").await?;
     tokio::spawn(launch_http(addr, tls_addr));
     server.serve().await.unwrap();
     Ok(())
@@ -82,14 +74,12 @@ async fn launch_http(
     tls_addr: std::net::SocketAddr,
 ) -> tokio::io::Result<()> {
     let listener_ip = addr;
-    let localhost_vhost = VirtualHost::new("localhost", &listener_ip.to_string(), "./");
     log::info!("Redirecting all on {addr} to {tls_addr}");
     let mut router = Router::new(());
     router
         .add_route(Route::redirect_all(&format!("https://{tls_addr}/")))
         .await;
-    let mut server = Server::bind(&listener_ip.to_string(), router).await?;
-    server.add_virtual_host(localhost_vhost).await;
+    let server = Server::bind(&listener_ip.to_string(), router, "./").await?;
     server.serve().await?;
     Ok(())
 }
