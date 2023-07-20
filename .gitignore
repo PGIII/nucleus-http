@@ -2,3 +2,4 @@
 .secrets
 Cargo.lock
 .DS_Store
+rustls_acme_cache
