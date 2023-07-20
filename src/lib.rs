@@ -11,9 +11,10 @@ pub mod virtual_host;
 
 use anyhow::Context;
 use bytes::{BufMut, BytesMut};
-
 use response::Response;
 use routes::Router;
+use rustls_acme::{caches::DirCache, AcmeConfig};
+use futures::StreamExt;
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -45,13 +46,13 @@ pub struct Server<S> {
     doc_root: PathBuf,
 }
 
-trait Stream: AsyncWrite + AsyncRead + Unpin + Send + Sync {}
+trait ConnectionStream: AsyncWrite + AsyncRead + Unpin + Send + Sync {}
 
 // Auto Implement Stream for all types that implent asyncRead + asyncWrite
-impl<T> Stream for T where T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync {}
+impl<T> ConnectionStream for T where T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync {}
 
 pub struct Connection {
-    stream: Box<dyn Stream>,
+    stream: Box<dyn ConnectionStream>,
     client_ip: std::net::SocketAddr,
 }
 
@@ -108,6 +109,46 @@ where
             .with_no_client_auth()
             .with_single_cert(certs, keys.remove(0))
             .context("Loading Certs")?;
+        let acceptor = TlsAcceptor::from(Arc::new(config));
+        let listener = tokio::net::TcpListener::bind(ip)
+            .await
+            .context("binding tls")?;
+        Ok(Server {
+            listener,
+            router: Arc::new(RwLock::new(router)),
+            virtual_hosts: Arc::new(RwLock::new(HashMap::new())),
+            acceptor: Some(acceptor),
+            cancel: CancellationToken::new(),
+            doc_root: PathBuf::from(doc_root.as_ref()),
+        })
+    }
+
+    #[tracing::instrument(level = "debug", skip(router, domains))]
+    pub async fn bind_tls_alpn(
+        ip: &str,
+        router: Router<S>,
+        doc_root: impl AsRef<Path> + Debug,
+        domains: impl IntoIterator<Item = impl AsRef<str>>,
+        email: &str
+    ) -> Result<Self, anyhow::Error> {
+        let contact = format!("mailto:{email}");
+        let acme = AcmeConfig::new(domains)
+            .contact_push(&contact)
+            .cache(DirCache::new("./rustls_acme_cache"));
+        let mut state = acme.state();
+        let resolver = state.resolver();
+        let config = rustls::ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_cert_resolver(resolver);
+        tokio::spawn(async move {
+            loop {
+                match state.next().await.unwrap() {
+                    Ok(ok) => log::info!("event: {:?}", ok),
+                    Err(err) => log::error!("error: {:?}", err),
+                }
+            }
+        });
         let acceptor = TlsAcceptor::from(Arc::new(config));
         let listener = tokio::net::TcpListener::bind(ip)
             .await

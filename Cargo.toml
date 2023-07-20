@@ -1,6 +1,6 @@
 [package]
 name = "nucleus-http"
-version = "0.12.0"
+version = "0.13.0"
 edition = "2021"
 license = "MIT"
 description = "Web Framework/Server"
@@ -20,10 +20,12 @@ async-trait = "0.1.68"
 base64 = "0.21.1"
 bytes = "1.4.0"
 enum-map = "2.5.0"
+futures = "0.3.28"
 hmac = "0.12.1"
 log = "0.4.17"
 memchr = "2.5.0"
 rand = "0.8.5"
+rustls-acme = { version = "0.7.3", features = ["tokio"] }
 rustls-pemfile = "1.0.2" 
 secrecy = "0.8.0"
 serde = {version = "1.0.163", features = ["derive"]}
