@@ -17,24 +17,6 @@ pub enum Version {
     V2_0,
 }
 
-/*
-#[derive(PartialEq, Debug, Clone, Copy)]
-pub enum StatusCode {
-    Continue = 100,
-    OK = 200,
-    MultipleChoices = 300,
-    MovedPermanetly = 301,
-    Found = 302,
-    SeeOther = 303,
-    TempRedirect = 307,
-    PermanentRedirect = 308,
-    ErrBadRequest = 400,
-    ErrUnathorized = 401,
-    ErrForbidden = 403,
-    ErrNotFound = 404,
-    ErrInternalServer = 500,
-}
-*/
 pub type StatusCode = http::StatusCode;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -48,6 +30,8 @@ pub enum MimeType {
     Icon,
     Binary,
     JPEG,
+    PNG,
+    Custom(&'static str),
 }
 
 impl TryFrom<&[u8]> for Method {
@@ -161,6 +145,8 @@ impl MimeType {
             Self::Icon => "image/vnd.microsoft.icon",
             Self::Binary => "application/octet-stream",
             Self::JPEG => "image/jpeg",
+            Self::PNG => "image/png",
+            Self::Custom(str) => str,
         }
     }
 
@@ -185,6 +171,7 @@ impl MimeType {
             "bin" => Self::Binary,
             "html" => Self::HTML,
             "jpeg" | "jpg" => Self::JPEG,
+            "png" => Self::PNG,
             _ => Self::PlainText,
         }
     }
@@ -283,34 +270,6 @@ impl Header {
     }
 }
 
-/*
-impl From<StatusCode> for &str {
-    fn from(status: StatusCode) -> &'static str {
-        match status {
-            StatusCode::Continue => "100 Continue",
-            StatusCode::OK => "200 OK",
-            StatusCode::MultipleChoices => "300 Multiple Choices",
-            StatusCode::MovedPermanetly => "301 Moved Permantely",
-            StatusCode::Found => "302 Found",
-            StatusCode::SeeOther => "303 See Other",
-            StatusCode::TempRedirect => "307 Temporarily Moved",
-            StatusCode::PermanentRedirect => "308 Permanent Redirect",
-            StatusCode::ErrUnathorized => "401 Unathorized",
-            StatusCode::ErrForbidden => "403 Forbidden",
-            StatusCode::ErrNotFound => "404 Not Found",
-            StatusCode::ErrBadRequest => "400 Bad Request",
-            StatusCode::ErrInternalServer => "500 Internal Server Error",
-        }
-    }
-}
-
-impl From<StatusCode> for String {
-    fn from(status: StatusCode) -> String {
-        let status_str: &str = status.into();
-        status_str.to_owned()
-    }
-}
-*/
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
