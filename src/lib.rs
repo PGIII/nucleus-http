@@ -286,7 +286,7 @@ where
                                     let error_res = format!("400 bad request: {}", e);
                                     tracing::warn!("{ip}: {}", error_res);
                                     let response = Response::error(
-                                        http::StatusCode::ErrBadRequest,
+                                        http::StatusCode::BAD_REQUEST,
                                         error_res.into(),
                                     );
                                     if let Err(err) = connection.write_response(response).await {

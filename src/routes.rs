@@ -167,7 +167,7 @@ where
                 }
                 RouteResolver::Redirect(redirect_to) => {
                     let mut response = Response::new(
-                        http::StatusCode::MovedPermanetly,
+                        http::StatusCode::MOVED_PERMANENTLY,
                         vec![],
                         MimeType::PlainText,
                     );
@@ -198,7 +198,7 @@ where
                     file_path = path.to_path_buf();
                 } else {
                     let mut response =
-                        Response::error(http::StatusCode::ErrNotFound, "File Not Found".into());
+                        Response::error(http::StatusCode::NOT_FOUND, "File Not Found".into());
                     self.push_headers(&mut response);
                     return response;
                 }
@@ -221,10 +221,10 @@ where
                 tracing::warn!("static load error:{}", err.to_string());
                 match err.kind() {
                     std::io::ErrorKind::PermissionDenied => {
-                        Response::error(http::StatusCode::ErrForbidden, "Permission Denied".into())
+                        Response::error(http::StatusCode::FORBIDDEN, "Permission Denied".into())
                     }
                     _ => Response::error(
-                        http::StatusCode::ErrNotFound,
+                        http::StatusCode::NOT_FOUND,
                         "Static File Not Found".into(),
                     ),
                 }

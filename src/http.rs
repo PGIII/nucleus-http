@@ -17,6 +17,7 @@ pub enum Version {
     V2_0,
 }
 
+/*
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum StatusCode {
     Continue = 100,
@@ -33,6 +34,8 @@ pub enum StatusCode {
     ErrNotFound = 404,
     ErrInternalServer = 500,
 }
+*/
+pub type StatusCode = http::StatusCode;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum MimeType {
@@ -280,6 +283,7 @@ impl Header {
     }
 }
 
+/*
 impl From<StatusCode> for &str {
     fn from(status: StatusCode) -> &'static str {
         match status {
@@ -306,7 +310,7 @@ impl From<StatusCode> for String {
         status_str.to_owned()
     }
 }
-
+*/
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {

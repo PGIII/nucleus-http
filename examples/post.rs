@@ -75,7 +75,7 @@ async fn success(state: AppState, _: Request) -> Result<String, Infallible> {
 
 async fn post(state: AppState, req: Request) -> Result<Response, Infallible> {
     let mut res = Response::new(
-        http::StatusCode::Found,
+        http::StatusCode::FOUND,
         "".into(),
         http::MimeType::PlainText,
     );

@@ -59,7 +59,7 @@ impl Response {
 
     pub fn to_send_buffer(&self) -> Vec<u8> {
         //transform response to array of bytes to be sent
-        let status: &str = self.status.into();
+        let status: &str = &self.status.to_string();
         let length = self.body.len();
         let version: &str = self.version.into();
         let content_type: String = String::from(&self.mime);
@@ -142,7 +142,7 @@ impl From<anyhow::Error> for Response {
         tracing::error!(?value);
        let message = "<h1>Error 500 Internal Server Error</h1>\r\n".to_string(); 
         Response {
-            status: StatusCode::ErrInternalServer, //FIXME: make this smarter
+            status: StatusCode::INTERNAL_SERVER_ERROR, //FIXME: make this smarter
             body: message.into(),
             mime: MimeType::HTML,
             version: Version::V1_1,
@@ -160,7 +160,7 @@ impl From<Infallible> for Response {
 
 impl From<Response> for String {
     fn from(response: Response) -> String {
-        let status: &str = response.status.into();
+        let status: &str = response.status.as_str();
         let length = response.body.len();
         let version: &str = response.version.into();
         let body: &str = &String::from_utf8_lossy(&response.body);
@@ -185,7 +185,7 @@ impl From<Response> for String {
 impl From<std::io::Error> for Response {
     fn from(error: std::io::Error) -> Self {
         Response {
-            status: StatusCode::ErrInternalServer,
+            status: StatusCode::INTERNAL_SERVER_ERROR,
             body: error.to_string().into(),
             mime: MimeType::HTML,
             version: Version::V1_1,
