@@ -11,16 +11,16 @@ pub mod virtual_host;
 
 use anyhow::Context;
 use bytes::{BufMut, BytesMut};
+use futures::StreamExt;
 use response::Response;
 use routes::Router;
 use rustls_acme::{caches::DirCache, AcmeConfig};
-use futures::StreamExt;
 use std::{
     collections::HashMap,
     fmt::Debug,
     path::{Path, PathBuf},
     sync::Arc,
-    vec,
+    vec, time::Duration,
 };
 use tokio::{
     self,
@@ -29,7 +29,7 @@ use tokio::{
     select,
     signal::unix::{signal, SignalKind},
     sync::RwLock,
-    task::JoinHandle,
+    task::JoinHandle, time::timeout,
 };
 use tokio_rustls::{
     rustls::{self, Certificate, PrivateKey},
@@ -44,6 +44,7 @@ pub struct Server<S> {
     virtual_hosts: Arc<RwLock<HashMap<String, virtual_host::VirtualHost<S>>>>,
     cancel: CancellationToken,
     doc_root: PathBuf,
+    timeout: Duration,
 }
 
 trait ConnectionStream: AsyncWrite + AsyncRead + Unpin + Send + Sync {}
@@ -90,6 +91,7 @@ where
             acceptor: None,
             cancel: CancellationToken::new(),
             doc_root: PathBuf::from(doc_root.as_ref()),
+            timeout: Duration::from_secs(60),
         })
     }
 
@@ -120,6 +122,7 @@ where
             acceptor: Some(acceptor),
             cancel: CancellationToken::new(),
             doc_root: PathBuf::from(doc_root.as_ref()),
+            timeout: Duration::from_secs(60),
         })
     }
 
@@ -129,7 +132,7 @@ where
         router: Router<S>,
         doc_root: impl AsRef<Path> + Debug,
         domains: impl IntoIterator<Item = impl AsRef<str>>,
-        email: &str
+        email: &str,
     ) -> Result<Self, anyhow::Error> {
         let contact = format!("mailto:{email}");
         let acme = AcmeConfig::new(domains)
@@ -160,6 +163,7 @@ where
             acceptor: Some(acceptor),
             cancel: CancellationToken::new(),
             doc_root: PathBuf::from(doc_root.as_ref()),
+            timeout: Duration::from_secs(60),
         })
     }
 
@@ -205,11 +209,12 @@ where
         let doc_root = self.doc_root.clone();
         let vhosts = self.virtual_hosts();
         let ip = connection.client_ip;
+        let timeout_duration = self.timeout;
         let read_loop = async move {
             let mut request_bytes = BytesMut::with_capacity(1024);
-            loop {
-                let mut buffer = vec![0; 1024]; //Vector to avoid buffer on stack
-                match connection.stream.read(&mut buffer).await {
+            let mut buffer = vec![0; 1024]; //Vector to avoid buffer on stack
+            while let Ok(stream_read_result) = timeout(timeout_duration, connection.stream.read(&mut buffer)).await {
+                match  stream_read_result {
                     Ok(0) => {
                         tracing::debug!("{ip}: Connection Terminated by client");
                         break;
@@ -295,6 +300,13 @@ where
                                             err.to_string()
                                         );
                                     }
+                                    tracing::debug!("{ip}: Shutting down Stream, bad request");
+                                    connection
+                                        .stream
+                                        .shutdown()
+                                        .await
+                                        .expect("Error Shutting down stream");
+                                    return;
                                 }
                             },
                         }
