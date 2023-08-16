@@ -20,7 +20,8 @@ use std::{
     fmt::Debug,
     path::{Path, PathBuf},
     sync::Arc,
-    vec, time::Duration,
+    time::Duration,
+    vec,
 };
 use tokio::{
     self,
@@ -29,7 +30,8 @@ use tokio::{
     select,
     signal::unix::{signal, SignalKind},
     sync::RwLock,
-    task::JoinHandle, time::timeout,
+    task::JoinHandle,
+    time::timeout,
 };
 use tokio_rustls::{
     rustls::{self, Certificate, PrivateKey},
@@ -91,7 +93,7 @@ where
             acceptor: None,
             cancel: CancellationToken::new(),
             doc_root: PathBuf::from(doc_root.as_ref()),
-            timeout: Duration::from_secs(60),
+            timeout: Duration::from_secs(30),
         })
     }
 
@@ -213,11 +215,13 @@ where
         let read_loop = async move {
             let mut request_bytes = BytesMut::with_capacity(1024);
             let mut buffer = vec![0; 1024]; //Vector to avoid buffer on stack
-            while let Ok(stream_read_result) = timeout(timeout_duration, connection.stream.read(&mut buffer)).await {
-                match  stream_read_result {
+            while let Ok(stream_read_result) =
+                timeout(timeout_duration, connection.stream.read(&mut buffer)).await
+            {
+                match stream_read_result {
                     Ok(0) => {
                         tracing::debug!("{ip}: Connection Terminated by client");
-                        break;
+                        return;
                     }
                     Ok(n) => {
                         //got some bytes append them and see if we need to do any proccessing
@@ -265,11 +269,7 @@ where
                                         tracing::debug!(
                                             "{ip}|{path}: Shutting down Stream, no keep alive"
                                         );
-                                        connection
-                                            .stream
-                                            .shutdown()
-                                            .await
-                                            .expect("Error Shutting down stream");
+                                        //returning should drop the connection and shutdown the socket
                                         return;
                                     }
                                 }
@@ -300,12 +300,8 @@ where
                                             err.to_string()
                                         );
                                     }
+                                    //returning should drop the connection and shutdown the socket
                                     tracing::debug!("{ip}: Shutting down Stream, bad request");
-                                    connection
-                                        .stream
-                                        .shutdown()
-                                        .await
-                                        .expect("Error Shutting down stream");
                                     return;
                                 }
                             },
@@ -313,11 +309,22 @@ where
                     }
                     Err(err) => {
                         tracing::error!("{ip}: Socket read error: {}", err.to_string());
-                        break;
+                        return;
                     }
                 }
             }
-            tracing::debug!("{ip} Done Serving Connection");
+            tracing::debug!("{ip} Connection Server Read Timeout");
+            /*
+            let mut response = Response::error(
+                StatusCode::REQUEST_TIMEOUT,
+                "Client failed to send request in time".into(),
+            );
+            response.add_header(("Connection", "close"));
+            if let Err(error) = connection.write_response(response).await {
+                //just log error since we are dropping connection anyhow
+                tracing::debug!("{ip} Error Writing: {}", error);
+            }
+            */
         };
 
         tokio::spawn(async move {
