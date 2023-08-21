@@ -289,7 +289,8 @@ where
                                 }
                                 _ => {
                                     let error_res = format!("400 bad request: {}", e);
-                                    tracing::warn!("{ip}: {}", error_res);
+                                    let req_string = String::from_utf8_lossy(&buffer);
+                                    tracing::warn!("{ip}: {} Request: {}", error_res, req_string);
                                     let response = Response::error(
                                         http::StatusCode::BAD_REQUEST,
                                         error_res.into(),
@@ -301,7 +302,7 @@ where
                                         );
                                     }
                                     //returning should drop the connection and shutdown the socket
-                                    tracing::debug!("{ip}: Shutting down Stream, bad request");
+                                    tracing::warn!("{ip}: Shutting down Stream, bad request");
                                     return;
                                 }
                             },
